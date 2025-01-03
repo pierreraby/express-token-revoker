@@ -28,7 +28,7 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
           throw new Error(`Missing claim: ${claim}`);
         }
         console.log(`${claim}-${reqWithToken.token[claim]}`);
-        if (bloomFilterManager.filterHas(`${claim}-${reqWithToken.token[claim]}`)) {
+        if (bloomFilterManager.has(`${claim}-${reqWithToken.token[claim]}`)) {
           throw new Error(`Token ${claim} is blacklisted`);
         }
       }
@@ -68,7 +68,7 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
       } else {
         token = req.headers[normalizedHeader];
       }
-      if (typeof token === 'string' && bloomFilterManager.filterHas(token)) {
+      if (typeof token === 'string' && bloomFilterManager.has(token)) {
         throw new Error(`Token is blacklisted`);
       }
       next();
@@ -80,19 +80,23 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
 
 /**
  * @typedef {import('express').RequestHandler} RequestHandler
+*
+ * @typedef {Object} ConfigBase
+ * @property {number} numItems - Number of items to store in the Bloom filter.
+ * @property {number} fpRate - Target false positive rate for the Bloom filter.
+ * @property {number} rotateTime - Rotation interval in milliseconds.
+*
+ * @typedef {ConfigBase & { claimsToCheck: Array<string>, opaqueHeader?: never }} JWTConfig
+ * @typedef {ConfigBase & { opaqueHeader: string, claimsToCheck?: never }} OpaqueConfig
+ * @typedef {JWTConfig | OpaqueConfig} Config
  */
 
 /**
- * Classe Revoker pour gérer le middleware et l'ajout au Bloom filter.
+ * Revoker class to manage middleware and adding items to the Bloom filter.
  */
 export class Revoker {
-  /**
-   * @param {Object} config - Configuration options.
-   * @param {number} config.numItems - Number of items to store.
-   * @param {number} config.fpRate - Target false positive rate.
-   * @param {number} config.rotateTime - Rotation interval in ms.
-   * @param {Array<string>} config.claimsToCheck - Claims to check.
-   * @param {string} config.opaqueHeader - Header to check for opaque tokens.
+/**
+   * @param {Config} config - Configuration options.
    * @throws {Error} If neither `claimsToCheck` nor `opaqueHeader` is provided.
    */
   constructor(config) {
@@ -125,7 +129,7 @@ export class Revoker {
    * @param {string} filterItem - The item to add.
    */
   add(filterItem) {
-    this.bloomFilterManager.filterAdd(filterItem);
+    this.bloomFilterManager.add(filterItem);
   }
 }
 
