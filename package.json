@@ -17,7 +17,8 @@
     "async-mutex": "^0.5.0",
     "bloomfilter": "^0.0.21",
     "express": "^4.21.2",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "sinon": "^19.0.2"
   },
   "devDependencies": {
     "@japa/api-client": "^2.0.4",

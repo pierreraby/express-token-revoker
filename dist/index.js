@@ -126,6 +126,7 @@ export class Revoker {
     } else if (opaqueHeader) {
       this.middleware = createOpaqueMiddleware(opaqueHeader, this.bloomFilterManager);
     } else {
+      this.bloomFilterManager.destroy();
       throw new Error("claimsToCheck or opaqueHeader must be provided");
     }
   }
@@ -157,7 +158,7 @@ export class Revoker {
   destroy() {
     if (this.bloomFilterManager) {
       this.bloomFilterManager.destroy();
-      this.bloomFilterManager = null; // Nettoyage explicite
+      this.bloomFilterManager = null; 
     }
   }
 }
