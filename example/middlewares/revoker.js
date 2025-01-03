@@ -1,5 +1,5 @@
 
-/* @ts-check */
+// @ts-check 
 import { Revoker } from '../../dist/index.js';
 
 const JWTconfig = { // this config uses ~21MB of memory

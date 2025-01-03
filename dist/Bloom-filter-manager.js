@@ -4,11 +4,6 @@
 import { Mutex } from 'async-mutex';
 import { BloomFilter } from 'bloomfilter';
 
-// Default configuration (can be overridden during instantiation)
-const DEFAULT_ROTATE_TIME = 5 * 60 * 1000; // 30 minutes in milliseconds
-const DEFAULT_NUM_ITEMS = 1000000; // 1 million items
-const DEFAULT_FP_RATE = 0.000001; // 1e-6
-
 /**
  * @typedef {typeof import('bloomfilter').BloomFilter & {
 *   withTargetError: (numItems: number, fpRate: number) => import('bloomfilter').BloomFilter
@@ -18,66 +13,96 @@ const DEFAULT_FP_RATE = 0.000001; // 1e-6
 /** @type {ExtendedBloomFilter} */
 const ExtendedBloomFilter = /** @type {ExtendedBloomFilter} */ (BloomFilter);
 
-
+/**
+ * @typedef {Object} BloomFilterOptions
+ * @property {number} numItems - Number of items to store in the filter.
+ * @property {number} fpRate - Target false positive rate.
+ * @property {number} rotateTime - Filter rotation interval in milliseconds.
+ */
 export class BloomFilterManager {
   /**
-   * Constructor to initialize the Bloom filter manager.
-   * @param {Object} options - Configuration options.
-   * @param {number} [options.numItems=DEFAULT_NUM_ITEMS] - Number of items to store.
-   * @param {number} [options.fpRate=DEFAULT_FP_RATE] - Target false positive rate.
-   * @param {number} [options.rotateTime=DEFAULT_ROTATE_TIME] - Filter rotation interval in ms.
+   * Creates an instance of BloomFilterManager.
+   * @param {BloomFilterOptions} options - Bloom filter configuration.
    */
+  constructor(options) {
+    /** @private */
+    this.numItems = options.numItems;
+    /** @private */
+    this.fpRate = options.fpRate;
+    /** @private */
+    this.rotateTime = options.rotateTime;
 
-  constructor({ numItems = DEFAULT_NUM_ITEMS, fpRate = DEFAULT_FP_RATE, rotateTime = DEFAULT_ROTATE_TIME }) {
-    this.numItems = numItems;
-    this.fpRate = fpRate;
-    this.rotateTime = rotateTime;
+    /** @private */
+    this.mutex = new Mutex(); // Create a lock for synchronization
 
-    this.mutex = new Mutex(); // Create a lock
+    console.log(
+      `Initializing BloomFilterManager with numItems=${this.numItems}, fpRate=${this.fpRate}, rotateTime=${this.rotateTime}`
+    );
 
-    console.log(`Initializing BloomFilterManager with numItems=${numItems}, fpRate=${fpRate}, rotateTime=${rotateTime}`);
+    /**
+     * @private
+     * @type {BloomFilter | null}
+     */
+    this.previous = null; // Previous filter
 
-    // Initialize the filters
-    this.filterClear();
+    /**
+     * @private
+     * @type {BloomFilter | null}
+     */
+    this.current = this._createBloomFilter(); // Current filter
 
-    // Start the rotation interval
+    /**
+     * @private
+     * @type {BloomFilter | null}
+     */
+    this.next = this._createBloomFilter(); // Next filter
+
     this.rotationInterval = setInterval(() => this.rotate(), this.rotateTime);
   }
+
+  /**
+   * Creates a new Bloom filter.
+   * @private
+   * @returns {BloomFilter}
+   */
+  _createBloomFilter() {
+    return ExtendedBloomFilter.withTargetError(this.numItems, this.fpRate);
+  }
+
   /**
    * Rotates the Bloom filters.
-   * @returns {Promise<void>}
+   * @private
    */
   async rotate() {
-    const release = await this.mutex.acquire(); // Acquire a lock for rotation
-    try {
-      this.previous = this.current; // The current filter becomes the previous one
-      this.current = this.next; // The next filter becomes the active one
-      this.next = ExtendedBloomFilter.withTargetError(this.numItems, this.fpRate); // Initialize the new filter
-      console.log('Bloom filters rotated.');
-    } catch (error) {
-      console.error('Error during Bloom filter rotation:', error);
-    } finally {
-      release(); // Release the lock
-    }
+    const release = this.mutex.acquire();
+    release.then((releaseFn) => {
+      try {
+        console.log('Rotating Bloom filters...');
+        this.previous = this.current;
+        this.current = this.next;
+        this.next = this._createBloomFilter();
+      } catch (error) {
+        console.error('Error rotating Bloom filters:', error);
+      } finally {
+        releaseFn();
+      }
+    });
   }
 
   /**
-   * Resets all Bloom filters.
-   */
-  filterClear() {
-  this.previous = ExtendedBloomFilter.withTargetError(this.numItems, this.fpRate);
-  this.current = ExtendedBloomFilter.withTargetError(this.numItems, this.fpRate);
-  this.next = ExtendedBloomFilter.withTargetError(this.numItems, this.fpRate);
-  console.log('Bloom filters cleared.');
-  }
-
-  /**
-   * Adds a value to the current and next Bloom filters.
+   * Adds a value to the current and next filters.
    * @param {string} value - The value to add.
    */
-  filterAdd(value) {
-    this.current?.add(value);
-    this.next?.add(value);
+  async add(value) {
+    const release = await this.mutex.acquire();
+    try {
+      this.current?.add(value);
+      this.next?.add(value);
+    } catch (error) {
+      console.error('Error adding value to Bloom filter:', error);
+    } finally {
+      release();
+    }
   }
 
   /**
@@ -85,8 +110,30 @@ export class BloomFilterManager {
    * @param {string} value - The value to check.
    * @returns {boolean} - `true` if the value might be present, `false` if it is definitely absent.
    */
-  filterHas(value) {
-    return (this.current ? this.current.test(value) : false) || (this.previous ? this.previous.test(value) : false);
+  has(value) {
+    return (
+      (this.current ? this.current.test(value) : false) ||
+      (this.previous ? this.previous.test(value) : false)
+    );
+  }
+
+  /**
+   * Resets the Bloom filters.
+   */
+  reset() {
+    const release = this.mutex.acquire();
+    release.then((releaseFn) => {
+      try {
+        this.previous = null;
+        this.current = this._createBloomFilter();
+        this.next = this._createBloomFilter();
+        console.log('Bloom filters reset.');
+      } catch (error) {
+        console.error('Error resetting Bloom filters:', error);
+      } finally {
+        releaseFn();
+      }
+    });
   }
 
   /**
@@ -96,4 +143,17 @@ export class BloomFilterManager {
     clearInterval(this.rotationInterval);
     console.log('Bloom filter rotation stopped.');
   }
+
+  /**
+   * Cleans up resources when the instance is destroyed.
+   */
+  destroy() {
+    clearInterval(this.rotationInterval);
+    this.previous = null;
+    this.current = null;
+    this.next = null;
+    console.log('BloomFilterManager destroyed.');
+  }
 }
+
+
