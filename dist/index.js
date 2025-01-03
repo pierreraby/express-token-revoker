@@ -27,14 +27,18 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
         if (!reqWithToken.token || !reqWithToken.token[claim]) {
           throw new Error(`Missing claim: ${claim}`);
         }
-        console.log(`${claim}-${reqWithToken.token[claim]}`);
+
         if (bloomFilterManager.has(`${claim}-${reqWithToken.token[claim]}`)) {
           throw new Error(`Token ${claim} is blacklisted`);
         }
       }
       next();
     } catch (error) {
-      res.status(401).json({ message: `Invalid token! ${error.message}` });
+      res.status(401).json({
+        error: "invalid_token",
+        message: `Invalid token! ${error.message}`,
+        details: error.details || null,
+      });
     }
   };
 };
@@ -73,7 +77,11 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
       }
       next();
     } catch (error) {
-      res.status(401).json({ message: `Invalid token! ${error.message}` });
+      res.status(401).json({
+        error: "invalid_token",
+        message: `Invalid token! ${error.message}`,
+        details: error.details || null,
+      });
     }
   };
 };
@@ -99,6 +107,12 @@ export class Revoker {
    * @param {Config} config - Configuration options.
    * @throws {Error} If neither `claimsToCheck` nor `opaqueHeader` is provided.
    */
+  /** @type {BloomFilterManager | null} */
+  bloomFilterManager = null;
+
+  /** @type {RequestHandler | null} */
+  middleware = null;
+
   constructor(config) {
     const { numItems, fpRate, rotateTime, claimsToCheck, opaqueHeader } = config;
     this.bloomFilterManager = new BloomFilterManager({
@@ -121,6 +135,9 @@ export class Revoker {
    * @returns {RequestHandler} Middleware Express.
    */
   getMiddleware() {
+    if (!this.middleware) {
+      throw new Error("Middleware not configured");
+    }
     return this.middleware;
   }
 
@@ -129,7 +146,19 @@ export class Revoker {
    * @param {string} filterItem - The item to add.
    */
   add(filterItem) {
-    this.bloomFilterManager.add(filterItem);
+    if (this.bloomFilterManager) {
+      this.bloomFilterManager.add(filterItem);
+    }
+  }
+
+  /**
+   * Destroys the Bloom filter manager.
+   */
+  destroy() {
+    if (this.bloomFilterManager) {
+      this.bloomFilterManager.destroy();
+      this.bloomFilterManager = null; // Nettoyage explicite
+    }
   }
 }
 
