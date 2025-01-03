@@ -5,8 +5,8 @@ import { Mutex } from 'async-mutex';
 import { BloomFilter } from 'bloomfilter';
 
 /**
- * ExtendedBloomFilter extends the original BloomFilter type by including the static method withTargetError..
- * This extension is necessary because the original BloomFilter class does not define the withTargetError method.
+ * ExtendedBloomFilter extends the original BloomFilter type by including the static method withTargetError.
+ * BloomFilter class does not define the withTargetError method.
  */
 /**
  * @typedef {typeof import('bloomfilter').BloomFilter & {
@@ -30,22 +30,24 @@ export class BloomFilterManager {
    */
   constructor(options) {
 
-    if (!options.numItems || options.numItems <= 0) {
-      throw new Error('numItems must be a positive number.');
+    const { numItems, fpRate, rotateTime } = options;
+
+    if (!numItems || !Number.isInteger(numItems)  || numItems <= 0) {
+      throw new Error('numItems must be a positive integer.');
     }
-    if (!options.fpRate || options.fpRate <= 0 || options.fpRate >= 1) {
+    if (!fpRate || fpRate <= 0 || fpRate >= 1) {
       throw new Error('fpRate must be a number between 0 and 1 (exclusive).');
     }
-    if (!options.rotateTime || options.rotateTime <= 0) {
-      throw new Error('rotateTime must be a positive number.');
+    if (!rotateTime || !Number.isInteger(rotateTime) || rotateTime <= 0) {
+      throw new Error('rotateTime must be a positive integer.');
     }
 
     /** @private */
-    this.numItems = options.numItems;
+    this.numItems = numItems;
     /** @private */
-    this.fpRate = options.fpRate;
+    this.fpRate = fpRate;
     /** @private */
-    this.rotateTime = options.rotateTime;
+    this.rotateTime = rotateTime;
 
     /** @private */
     this.mutex = new Mutex(); // Create a lock for synchronization
@@ -72,6 +74,9 @@ export class BloomFilterManager {
      */
     this.next = this._createBloomFilter(); // Next filter
 
+    /** @private
+     * @type {NodeJS.Timeout | null}
+     */
     this.rotationInterval = setInterval(() => this.rotate(), this.rotateTime);
   }
 
@@ -157,15 +162,18 @@ export class BloomFilterManager {
    * Stops the Bloom filter rotation interval.
    */
   stopRotation() {
-    clearInterval(this.rotationInterval);
-    console.log('Bloom filter rotation stopped.');
+    if (this.rotationInterval !== null) {
+      clearInterval(this.rotationInterval);
+      this.rotationInterval = null;
+      console.log('Bloom filter rotation stopped.');
+    }
   }
 
   /**
    * Cleans up resources when the instance is destroyed.
    */
   destroy() {
-    clearInterval(this.rotationInterval);
+    this.stopRotation();
     this.previous = null;
     this.current = null;
     this.next = null;
