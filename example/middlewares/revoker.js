@@ -22,8 +22,9 @@ const opaqueConfig = {
 const opaqueRevoker = new Revoker(opaqueConfig);
 const opaqueFilter = opaqueRevoker.getMiddleware();
 
-const opaqueConfigCustom = { // this config uses ~21MB of memory
+const opaqueConfigCustom = { // this config uses ~30MB of memory
   numItems: 1000000,
+  fpRate: 0.000000001, // one in a billion
   rotateTime: 1800000,
   opaqueHeader: "X-Auth-Token" // adding header where to check opaque token.
 };
