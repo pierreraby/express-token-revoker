@@ -1,25 +1,28 @@
 {
-	"name": "express-jwt-revoker",
-	"version": "1.0.0",
-	"description": "",
-	"main": "index.js",
-	"keywords": [],
-	"author": "",
-	"license": "ISC",
-	"type": "module",
-	"scripts": {
-		"start": "node --env-file=.env ./example/app.js",
-		"dev": "nodemon --env-file=.env ./example/app.js",
-		"client": "node --env-file=.env ./example/client.js"
-	},
-	"dependencies": {
-		"@japa/runner": "^3.1.4",
-		"async-mutex": "^0.5.0",
-		"bloomfilter": "^0.0.21",
-		"express": "^4.21.2",
-		"jsonwebtoken": "^9.0.2"
-	},
-	"devDependencies": {
-		"nodemon": "^3.1.9"
-	}
+  "name": "express-jwt-revoker",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file=.env ./example/app.js",
+    "dev": "nodemon --env-file=.env ./example/app.js",
+    "client": "node --env-file=.env ./example/client.js",
+    "test": "node bin/test.js"
+  },
+  "dependencies": {
+    "async-mutex": "^0.5.0",
+    "bloomfilter": "^0.0.21",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "@japa/api-client": "^2.0.4",
+    "@japa/expect": "^3.0.2",
+    "@japa/runner": "^3.1.4",
+    "nodemon": "^3.1.9"
+  }
 }
