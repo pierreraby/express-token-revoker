@@ -10,7 +10,7 @@ const token = jwt.sign({
   name: 'John Doe',
 }, process.env.JWT_SECRET_KEY, { expiresIn: '1h' });
 
-console.log(token);
+// console.log(token);
 
 const adminToken = jwt.sign({
   sub: '1234567890',
@@ -20,7 +20,7 @@ const adminToken = jwt.sign({
   admin: '987654321-1234567890',
 }, process.env.JWT_SECRET_KEY, { expiresIn: '1h' });
 
-console.log(adminToken);
+// console.log(adminToken);
 
 // check access to protected route with valid JWT token
 const reqValid = await fetch('http://localhost:3000/protected', {
