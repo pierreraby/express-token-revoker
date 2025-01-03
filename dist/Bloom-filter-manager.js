@@ -5,6 +5,10 @@ import { Mutex } from 'async-mutex';
 import { BloomFilter } from 'bloomfilter';
 
 /**
+ * ExtendedBloomFilter extends the original BloomFilter type by including the static method withTargetError..
+ * This extension is necessary because the original BloomFilter class does not define the withTargetError method.
+ */
+/**
  * @typedef {typeof import('bloomfilter').BloomFilter & {
 *   withTargetError: (numItems: number, fpRate: number) => import('bloomfilter').BloomFilter
 * }} ExtendedBloomFilter
@@ -25,6 +29,17 @@ export class BloomFilterManager {
    * @param {BloomFilterOptions} options - Bloom filter configuration.
    */
   constructor(options) {
+
+    if (!options.numItems || options.numItems <= 0) {
+      throw new Error('numItems must be a positive number.');
+    }
+    if (!options.fpRate || options.fpRate <= 0 || options.fpRate >= 1) {
+      throw new Error('fpRate must be a number between 0 and 1 (exclusive).');
+    }
+    if (!options.rotateTime || options.rotateTime <= 0) {
+      throw new Error('rotateTime must be a positive number.');
+    }
+
     /** @private */
     this.numItems = options.numItems;
     /** @private */
@@ -74,34 +89,37 @@ export class BloomFilterManager {
    * @private
    */
   async rotate() {
-    const release = this.mutex.acquire();
-    release.then((releaseFn) => {
-      try {
-        console.log('Rotating Bloom filters...');
-        this.previous = this.current;
-        this.current = this.next;
-        this.next = this._createBloomFilter();
-      } catch (error) {
-        console.error('Error rotating Bloom filters:', error);
-      } finally {
-        releaseFn();
-      }
-    });
+    const release = await this.mutex.acquire();
+    try {
+      console.log('Rotating Bloom filters...');
+      this.previous = this.current;
+      this.current = this.next;
+      this.next = this._createBloomFilter();
+    } catch (error) {
+      console.error('Error rotating Bloom filters:', error);
+    } finally {
+      release();
+    }
   }
 
   /**
    * Adds a value to the current and next filters.
    * @param {string} value - The value to add.
+   * @throws {TypeError} If the value is not a string.
    */
-  async add(value) {
-    const release = await this.mutex.acquire();
+  add(value) {
+    if (typeof value !== 'string') {
+      const error = new TypeError('Value must be a string.');
+      console.error(error.message);
+      throw error;
+    }
+
     try {
       this.current?.add(value);
       this.next?.add(value);
     } catch (error) {
       console.error('Error adding value to Bloom filter:', error);
-    } finally {
-      release();
+      throw error;
     }
   }
 
@@ -120,9 +138,8 @@ export class BloomFilterManager {
   /**
    * Resets the Bloom filters.
    */
-  reset() {
-    const release = this.mutex.acquire();
-    release.then((releaseFn) => {
+  async reset() {
+    const release = await this.mutex.acquire();
       try {
         this.previous = null;
         this.current = this._createBloomFilter();
@@ -130,10 +147,10 @@ export class BloomFilterManager {
         console.log('Bloom filters reset.');
       } catch (error) {
         console.error('Error resetting Bloom filters:', error);
+        throw error;
       } finally {
-        releaseFn();
+        release();
       }
-    });
   }
 
   /**
