@@ -76,12 +76,8 @@ export class BloomFilterManager {
    * @param {string} value - The value to add.
    */
   filterAdd(value) {
-    if (this.current) {
-      this.current.add(value);
-    }
-    if (this.next) {
-      this.next.add(value);
-    }
+    this.current?.add(value);
+    this.next?.add(value);
   }
 
   /**
