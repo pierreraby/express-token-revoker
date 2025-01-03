@@ -3,19 +3,32 @@
 import { BloomFilterManager } from "./Bloom-filter-manager.js";
 
 /**
+ * @typedef {import('express').Request} Request
+ * @typedef {Request & { token?: any }} RequestWithToken
+ */
+
+/**
  * Middleware factory to check claims with the Bloom filter.
  * @param {Array<string>} claimsToCheck - List of claims to check.
  * @param {BloomFilterManager} bloomFilterManager - Instance of the Bloom filter manager.
- * @returns {Function} Express middleware.
- */
+ * @returns {import('express').RequestHandler} Middleware Express.
+*/
 const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
   return (req, res, next) => {
+      /** @type {RequestWithToken} */
+      const reqWithToken = req;
+
     try {
+      if (!reqWithToken.token) {
+        throw new Error("Missing token");
+      }
+
       for (const claim of claimsToCheck) {
-        if (!req.token || !req.token[claim]) {
+        if (!reqWithToken.token || !reqWithToken.token[claim]) {
           throw new Error(`Missing claim: ${claim}`);
         }
-        if (bloomFilterManager.filterHas(`${claim}-${req.token[claim]}`)) {
+        console.log(`${claim}-${reqWithToken.token[claim]}`);
+        if (bloomFilterManager.filterHas(`${claim}-${reqWithToken.token[claim]}`)) {
           throw new Error(`Token ${claim} is blacklisted`);
         }
       }
@@ -27,13 +40,15 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
 };
 
 /**
- * createOpaqueMiddleware
+ * Middleware factory to check opaque token with the Bloom filter.
  * @param {string} header - The header to check.
  * @param {BloomFilterManager} bloomFilterManager - Instance of the Bloom filter manager.
- * @returns {Function} Express middleware.
+ * @returns {import('express').RequestHandler} Middleware Express.
  */
  const createOpaqueMiddleware = (header, bloomFilterManager) => {
   return (req, res, next) => {
+    /** @type {RequestWithToken} */
+    const reqWithToken = req;
     try {
       const normalizedHeader = header.toLowerCase();
       if (!req.headers[normalizedHeader]) {
@@ -42,6 +57,9 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
       
       let token;
       if (normalizedHeader === "authorization") {
+        if (!req.headers.authorization) {
+          throw new Error(`Missing authorization header`);
+        }
         const parts = req.headers.authorization.split(" ");
         if (parts.length !== 2 || parts[0].toLowerCase() !== "bearer") {
           throw new Error(`Invalid authorization format`);
@@ -50,7 +68,7 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
       } else {
         token = req.headers[normalizedHeader];
       }
-      if (bloomFilterManager.filterHas(token)) {
+      if (typeof token === 'string' && bloomFilterManager.filterHas(token)) {
         throw new Error(`Token is blacklisted`);
       }
       next();
@@ -60,18 +78,22 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
   };
 };
 
+/**
+ * @typedef {import('express').RequestHandler} RequestHandler
+ */
 
 /**
  * Classe Revoker pour gérer le middleware et l'ajout au Bloom filter.
  */
 export class Revoker {
   /**
-   * @param {Object} config - Configuration des options.
-   * @param {number} config.numItems - Nombre d'items à stocker.
-   * @param {number} config.fpRate - Taux de faux positifs cible.
-   * @param {number} config.rotateTime - Intervalle de rotation en ms.
-   * @param {Array<string>} config.claimsToCheck - Claims à vérifier.
-   * @param {string} config.opaqueHeader - Header à vérifierpour les tokens opaques.
+   * @param {Object} config - Configuration options.
+   * @param {number} config.numItems - Number of items to store.
+   * @param {number} config.fpRate - Target false positive rate.
+   * @param {number} config.rotateTime - Rotation interval in ms.
+   * @param {Array<string>} config.claimsToCheck - Claims to check.
+   * @param {string} config.opaqueHeader - Header to check for opaque tokens.
+   * @throws {Error} If neither `claimsToCheck` nor `opaqueHeader` is provided.
    */
   constructor(config) {
     const { numItems, fpRate, rotateTime, claimsToCheck, opaqueHeader } = config;
@@ -91,16 +113,16 @@ export class Revoker {
   }
 
   /**
-   * Retourne le middleware configuré.
-   * @returns {Function} Middleware Express.
+   * Returns the configured middleware.
+   * @returns {RequestHandler} Middleware Express.
    */
   getMiddleware() {
     return this.middleware;
   }
 
   /**
-   * Ajoute un élément au Bloom filter.
-   * @param {string} filterItem - L'élément à ajouter.
+   * Adds an item to the Bloom filter.
+   * @param {string} filterItem - The item to add.
    */
   add(filterItem) {
     this.bloomFilterManager.filterAdd(filterItem);
