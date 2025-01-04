@@ -1,7 +1,6 @@
 // @ts-check
 
 // Bloom filter manager class to manage multiple Bloom filters with rotation.
-import { Mutex } from 'async-mutex';
 import { BloomFilter } from 'bloomfilter';
 
 /**
@@ -48,9 +47,6 @@ export class BloomFilterManager {
     this.fpRate = fpRate;
     /** @private */
     this.rotateTime = rotateTime;
-
-    /** @private */
-    this.mutex = new Mutex(); // Create a lock for synchronization
 
     console.log(
       `Initializing BloomFilterManager with numItems=${this.numItems}, fpRate=${this.fpRate}, rotateTime=${this.rotateTime}`
