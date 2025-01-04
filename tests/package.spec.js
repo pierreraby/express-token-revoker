@@ -2,7 +2,6 @@ import { test } from '@japa/runner'
 import { BloomFilterManager } from '../dist/Bloom-filter-manager.js'
 import { Revoker } from '../dist/index.js'
 import sinon from 'sinon'
-import e from 'express'
 
 test.group('BloomFilterManager Constructor Validation', () => {
   test('constructor throws error when numItems is not provided', ({ expect }) => {
@@ -132,6 +131,42 @@ test.group('BloomFilterManager Functional Tests', (group) => {
     manager.stopRotation()
     expect(manager.rotationInterval).toBeNull()
     expect(clearIntervalSpy.calledOnce).toBe(true)
+  })
+
+  test('stopRotation method does nothing if rotationInterval is null', ({ expect }) => {
+    manager.rotationInterval = null
+    manager.stopRotation()
+    expect(clearIntervalSpy.called).toBe(false)
+  })
+
+  test('ensures tokens are not lost during multiple rotations', async ({ expect }) => {
+    const manager = new BloomFilterManager({
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 10,
+    })
+    const tokens = ['alpha', 'beta', 'gamma']
+
+    tokens.forEach((token) => manager.add(token))
+    tokens.forEach((token) => {
+      expect(manager.has(token)).toBe(true)
+    })
+  
+    await new Promise((resolve) => setTimeout(resolve, 12))
+  
+    const newTokens = ['delta', 'epsilon']
+    newTokens.forEach((token) => manager.add(token))
+  
+    tokens.concat(newTokens).forEach((token) => {
+      expect(manager.has(token)).toBe(true)
+    })
+  
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  
+    tokens.concat(newTokens).forEach((token) => {
+      expect(manager.has(token)).toBe(true)
+    })
+    manager.destroy()
   })
 })
 
