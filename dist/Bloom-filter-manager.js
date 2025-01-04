@@ -144,18 +144,15 @@ export class BloomFilterManager {
    * Resets the Bloom filters.
    */
   async reset() {
-    const release = await this.mutex.acquire();
-      try {
-        this.previous = null;
-        this.current = this._createBloomFilter();
-        this.next = this._createBloomFilter();
-        console.log('Bloom filters reset.');
-      } catch (error) {
-        console.error('Error resetting Bloom filters:', error);
-        throw error;
-      } finally {
-        release();
-      }
+    try {
+      this.previous = null;
+      this.current = this._createBloomFilter();
+      this.next = this._createBloomFilter();
+      console.log('Bloom filters reset.');
+    } catch (error) {
+      console.error('Error resetting Bloom filters:', error);
+      throw error;
+    } 
   }
 
   /**
