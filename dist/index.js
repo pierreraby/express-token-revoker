@@ -20,12 +20,12 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
 
     try {
       if (!reqWithToken.token) {
-        throw new Error("Missing token");
+        throw new Error("Missing jwt token");
       }
 
       for (const claim of claimsToCheck) {
-        if (!reqWithToken.token || !reqWithToken.token[claim]) {
-          throw new Error(`Missing claim: ${claim}`);
+        if (!reqWithToken.token[claim]) {
+          throw new Error(`Missing ${claim} claim in JWT token`);
         }
 
         if (bloomFilterManager.has(`${claim}-${reqWithToken.token[claim]}`)) {
@@ -39,6 +39,7 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
         message: `Invalid token! ${error.message}`,
         details: error.details || null,
       });
+      throw error;
     }
   };
 };
@@ -51,22 +52,18 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
  */
  const createOpaqueMiddleware = (header, bloomFilterManager) => {
   return (req, res, next) => {
-    /** @type {RequestWithToken} */
-    const reqWithToken = req;
     try {
       const normalizedHeader = header.toLowerCase();
-      if (!req.headers[normalizedHeader]) {
+      if (!req.headers || !req.headers[normalizedHeader]) {
         throw new Error(`Missing header: ${header}`);
       }
       
       let token;
       if (normalizedHeader === "authorization") {
-        if (!req.headers.authorization) {
-          throw new Error(`Missing authorization header`);
-        }
+        // @ts-ignore
         const parts = req.headers.authorization.split(" ");
         if (parts.length !== 2 || parts[0].toLowerCase() !== "bearer") {
-          throw new Error(`Invalid authorization format`);
+          throw new Error('Invalid authorization header');
         }
         token = parts[1];
       } else {
@@ -82,6 +79,7 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
         message: `Invalid token! ${error.message}`,
         details: error.details || null,
       });
+      throw error;
     }
   };
 };

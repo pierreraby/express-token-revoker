@@ -101,9 +101,7 @@ export class BloomFilterManager {
    */
   add(value) {
     if (typeof value !== 'string') {
-      const error = new TypeError('Value must be a string.');
-      console.error(error.message);
-      throw error;
+      throw new TypeError('Value must be a string.');
     }
     try {
       this.current?.add(value);
@@ -119,11 +117,16 @@ export class BloomFilterManager {
    * @returns {boolean} - `true` if the value might be present, `false` if it is definitely absent.
    */
   has(value) {
-    return (
-      (this.current ? this.current.test(value) : false) ||
-      (this.previous ? this.previous.test(value) : false)
-    );
-  }
+    try {
+        return (
+          (this.current ? this.current.test(value) : false) ||
+          (this.previous ? this.previous.test(value) : false)
+        );
+    } catch (error) {
+        console.error('Error in has:', error);
+        return false;
+    }
+}
 
   /**
    * Resets the Bloom filters.
