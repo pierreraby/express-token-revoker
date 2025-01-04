@@ -4,7 +4,7 @@ import { Revoker } from '../dist/index.js'
 import sinon from 'sinon'
 import e from 'express'
 
-test.group('BloomFilterManager Constructor Validation', (group) => {
+test.group('BloomFilterManager Constructor Validation', () => {
   test('constructor throws error when numItems is not provided', ({ expect }) => {
     expect(() => new BloomFilterManager({
       fpRate: 0.01,
@@ -27,12 +27,26 @@ test.group('BloomFilterManager Constructor Validation', (group) => {
       rotateTime: 1000,
     })).toThrow('numItems must be a positive integer.')
   })
+
+  test('constructor throws error when fpRate is not provided', ({ expect }) => {
+    expect(() => new BloomFilterManager({
+      numItems: 1000,
+      rotateTime: 1000,
+    })).toThrow('fpRate must be a number between 0 and 1 (exclusive).')
+  })
   test('constructor throws error for invalid fpRate', ({expect}) => {
     expect(() => new BloomFilterManager({
       numItems: 1000,
       fpRate: 1.5,
       rotateTime: 1000,
     })).toThrow('fpRate must be a number between 0 and 1 (exclusive).')
+  })
+
+  test('constructor throws error when rotateTime is not provided', ({ expect }) => {
+    expect(() => new BloomFilterManager({
+      numItems: 1000,
+      fpRate: 0.01,
+    })).toThrow('rotateTime must be a positive integer.')
   })
 
   test('constructor throws error when rotateTime is not an integer', ({ expect }) => {
@@ -54,8 +68,10 @@ test.group('BloomFilterManager Constructor Validation', (group) => {
 
 test.group('BloomFilterManager Functional Tests', (group) => {
   let manager
+  let clearIntervalSpy
 
   group.setup(() => {
+    clearIntervalSpy = sinon.spy(global, 'clearInterval')
     manager = new BloomFilterManager({
       numItems: 1000,
       fpRate: 0.01,
@@ -65,6 +81,7 @@ test.group('BloomFilterManager Functional Tests', (group) => {
 
   group.teardown(() => {
     manager.destroy()
+    clearIntervalSpy.restore()
   })
 
   test('filters rotate correctly after rotateTime', async ({expect}) => {
@@ -108,11 +125,13 @@ test.group('BloomFilterManager Functional Tests', (group) => {
     expect(manager.current).toBeNull()
     expect(manager.next).toBeNull()
     expect(manager.rotationInterval).toBeNull()
+    expect(clearIntervalSpy.calledOnce).toBe(true)
   })
 
   test('stopRotation method stops the rotation process', ({ expect }) => {
     manager.stopRotation()
     expect(manager.rotationInterval).toBeNull()
+    expect(clearIntervalSpy.calledOnce).toBe(true)
   })
 })
 
@@ -120,7 +139,7 @@ test.group('Revoker Class Tests', (group) => {
   let destroySpy
 
   group.teardown(() => {
-    instance.bloomFilterManager.destroy()
+    
   })
   test('constructor throws error when neither claimsToCheck nor opaqueHeader is provided', ({ expect }) => {
     destroySpy = sinon.spy(BloomFilterManager.prototype, 'destroy')
@@ -142,6 +161,15 @@ test.group('Revoker Class Tests', (group) => {
     }
     const instance = new Revoker(config)
     expect(instance.bloomFilterManager).toBeInstanceOf(BloomFilterManager)
+    expect(instance.bloomFilterManager.numItems).toBe(config.numItems)
+    expect(instance.bloomFilterManager.fpRate).toBe(config.fpRate)
+    expect(instance.bloomFilterManager.rotateTime).toBe(config.rotateTime)
+    expect(instance.bloomFilterManager.current).toBeDefined()
+    expect(instance.bloomFilterManager.next).toBeDefined()
+    expect(instance.bloomFilterManager.previous).toBeNull()
+    expect(instance.bloomFilterManager.rotationInterval).toBeDefined()
+    expect(instance.bloomFilterManager.mutex).toBeDefined()
+    instance.bloomFilterManager.destroy()
   })
 
   test('constructor initializes middleware with claimsToCheck', ({ expect }) => {
@@ -156,6 +184,7 @@ test.group('Revoker Class Tests', (group) => {
     expect(middleware).toBeDefined()
     expect(middleware).toBeInstanceOf(Function)
     expect(middleware.length).toBe(3)
+    instance.bloomFilterManager.destroy()
   })
 
   test('constructor initializes middleware with opaqueHeader', ({ expect }) => {
@@ -170,5 +199,6 @@ test.group('Revoker Class Tests', (group) => {
     expect(middleware).toBeDefined()
     expect(middleware).toBeInstanceOf(Function)
     expect(middleware.length).toBe(3)
+    instance.bloomFilterManager.destroy()
   })
 })
