@@ -69,11 +69,6 @@ export class BloomFilterManager {
     this.current = this._createBloomFilter(); // Current filter
 
     /**
-     * @private
-     * @type {BloomFilter | null}
-     */
-    this.next = this._createBloomFilter(); // Next filter
-
     /** @private
      * @type {NodeJS.Timeout | null}
      */
@@ -94,17 +89,13 @@ export class BloomFilterManager {
    * @private
    */
   async rotate() {
-    const release = await this.mutex.acquire();
     try {
       console.log('Rotating Bloom filters...');
       this.previous = this.current;
-      this.current = this.next;
-      this.next = this._createBloomFilter();
+      this.current = this._createBloomFilter();
     } catch (error) {
       console.error('Error rotating Bloom filters:', error);
-    } finally {
-      release();
-    }
+    } 
   }
 
   /**
@@ -118,10 +109,8 @@ export class BloomFilterManager {
       console.error(error.message);
       throw error;
     }
-
     try {
       this.current?.add(value);
-      this.next?.add(value);
     } catch (error) {
       console.error('Error adding value to Bloom filter:', error);
       throw error;
@@ -147,7 +136,6 @@ export class BloomFilterManager {
     try {
       this.previous = null;
       this.current = this._createBloomFilter();
-      this.next = this._createBloomFilter();
       console.log('Bloom filters reset.');
     } catch (error) {
       console.error('Error resetting Bloom filters:', error);
@@ -173,7 +161,6 @@ export class BloomFilterManager {
     this.stopRotation();
     this.previous = null;
     this.current = null;
-    this.next = null;
     console.log('BloomFilterManager destroyed.');
   }
 }
