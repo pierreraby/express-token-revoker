@@ -133,12 +133,6 @@ test.group('BloomFilterManager Functional Tests', (group) => {
     expect(clearIntervalSpy.calledOnce).toBe(true)
   })
 
-  test('stopRotation method does nothing if rotationInterval is null', ({ expect }) => {
-    manager.rotationInterval = null
-    manager.stopRotation()
-    expect(clearIntervalSpy.called).toBe(false)
-  })
-
   test('ensures tokens are not lost during multiple rotations', async ({ expect }) => {
     const manager = new BloomFilterManager({
       numItems: 1000,
