@@ -136,7 +136,7 @@ test.group('BloomFilterManager Functional Tests', (group) => {
     clearIntervalSpy = sinon.spy(global, 'clearInterval')
     manager = new BloomFilterManager({
       numItems: 1000,
-      fpRate: 0.01,
+      fpRate: 0.0001,
       rotateTime: 1000, // 1 second for testing
     })
   })
@@ -198,7 +198,7 @@ test.group('BloomFilterManager Functional Tests', (group) => {
   test('tokens are correctly rotated and expired after rotateTime', async ({ expect }) => {
     const manager = new BloomFilterManager({
       numItems: 1000,
-      fpRate: 0.01,
+      fpRate: 0.0001,
       rotateTime: 10,
     })
     const tokens = ['alpha', 'beta', 'gamma']
@@ -647,46 +647,3 @@ test('createJWTMiddleware correctly checks claimsToCheck', async ({ expect }) =>
   });
     
 })
-
-
-// test.group('BloomFilterManager Functional Tests 2', (group) => {
-//   let manager
-//   let addStubCurrent
-//   let addStubPrevious
-
-//   group.setup(() => {
-//     manager = new BloomFilterManager({
-//       numItems: 1000,
-//       fpRate: 0.01,
-//       rotateTime: 1000,
-//     })
-//     addStubCurrent = sinon.stub(manager.current, 'add')
-//     manager.previous = manager._createBloomFilter() // simulate one rotation otherwise previous is null
-//     addStubPrevious = sinon.stub(manager.previous, 'add')
-//   })
-
-//   group.teardown(() => {
-//     addStubCurrent.restore()
-//     addStubPrevious.restore()
-//     manager.destroy()
-//   })
-
-//   test('has method correctly checks current and previous Bloom filters', ({ expect }) => {
-//     const valueInCurrent = 'currentValue'
-//     const valueInPrevious = 'previousValue'
-//     const valueNotInFilters = 'notInFilter'
-
-//     // Stub the test method for current and previous
-//     const testStubCurrent = sinon.stub(manager.current, 'test')
-//       .withArgs(valueInCurrent).returns(true)
-//       .withArgs(valueNotInFilters).returns(false)
-//     const testStubPrevious = sinon.stub(manager.previous, 'test')
-//       .withArgs(valueInPrevious).returns(true)
-//       .withArgs(valueNotInFilters).returns(false)
-
-//     // Test values
-//     expect(manager.has(valueInCurrent)).toBe(true)
-//     expect(manager.has(valueInPrevious)).toBe(true)
-//     expect(manager.has(valueNotInFilters)).toBe(false)
-//   })
-// })

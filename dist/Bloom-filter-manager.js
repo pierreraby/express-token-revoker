@@ -2,6 +2,7 @@
 
 // Bloom filter manager class to manage multiple Bloom filters with rotation.
 import { BloomFilter } from 'bloomfilter';
+import fs from 'fs';
 
 /**
  * ExtendedBloomFilter extends the original BloomFilter type by including the static method withTargetError.
@@ -69,6 +70,12 @@ export class BloomFilterManager {
      * @type {NodeJS.Timeout | null}
      */
     this.rotationInterval = setInterval(() => this.rotate(), this.rotateTime);
+
+    /**
+     * @private
+     * @type {NodeJS.Timeout | null}
+     * */
+    setInterval(() => this.backup(), 1 * 60 * 1000); // Backup every 5 minutes
   }
 
   /**
@@ -126,7 +133,43 @@ export class BloomFilterManager {
         console.error('Error in has:', error);
         return false;
     }
-}
+  }
+  /**
+   * Backup the current and previous filters.
+   * @private
+   * @returns {void}
+   */
+  backup() {
+    try {
+      if (this.current) {
+        const buffer = Buffer.from(this.current.buckets.buffer); // Convertir en buffer
+        fs.writeFileSync('./backup/current.blob', buffer);
+      }
+      if (this.previous) {
+        const buffer = Buffer.from(this.previous.buckets.buffer); // Convertir en buffer
+        fs.writeFileSync('./backup/previous.blob', buffer);
+      }
+      console.log('Backup done');
+    } catch (error) {
+      console.error('Backup failed:', error);
+    }
+  }
+
+  /**
+   * Restore the current and previous filters.
+   */
+  // restore() {
+  //   try {
+  //     if (fs.existsSync('current.blob')) {
+  //     const buffer = fs.readFileSync(filePath);
+  //     const buckets = new Int32Array(buffer.buffer, buffer.byteOffset, buffer.length / Int32Array.BYTES_PER_ELEMENT);
+  //     //console.log(`Bloom filter restauré depuis le blob ${filePath}`);
+  //     return new BloomFilter(buckets, k);
+  //     console.log('Restore done');
+  //   } catch (error) {
+  //     console.error('Restore failed:', error);
+  //   }
+
 
   /**
    * Resets the Bloom filters.

@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
+import { exit } from 'process';
 
-const jti = '446655440013';
+const jti = '446655440015';
 const opaqueToken = 'WMbQRwfGbYY1qmsmmyRvJ4LKlMrgl5s4OXTXG9OPBrRtFbtpZ1uBHYtBiGjIpT1q';
 
 const token = jwt.sign({
@@ -10,7 +11,7 @@ const token = jwt.sign({
   name: 'John Doe',
 }, process.env.JWT_SECRET_KEY, { expiresIn: '1h' });
 
-// console.log(token);
+console.log(token);
 
 const adminToken = jwt.sign({
   sub: '1234567890',
@@ -20,7 +21,7 @@ const adminToken = jwt.sign({
   admin: '987654321-1234567890',
 }, process.env.JWT_SECRET_KEY, { expiresIn: '1h' });
 
-// console.log(adminToken);
+console.log(adminToken);
 
 // check access to protected route with valid JWT token
 const reqValid = await fetch('http://localhost:3000/protected', {
@@ -32,6 +33,21 @@ const reqValid = await fetch('http://localhost:3000/protected', {
 
 const data = await reqValid.json();
 console.log('JWT valid token :' + data.message);
+
+// revoke JWT token
+for (let i = 0; i < 100000; i++) {
+  const adminRevocation = await fetch('http://localhost:3000/revoke/jti/' + i, {
+    'method': 'POST',
+    'headers': {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${adminToken}`,
+    },
+  });
+  // const data2 = await adminRevocation.json();
+  // console.log('Revocation JWT' + data2.message);
+}
+
+exit(0);
 
 // revoke JWT token
 const adminRevocation = await fetch('http://localhost:3000/revoke/jti/' + jti, {
