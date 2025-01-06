@@ -26,7 +26,7 @@ const opaqueConfigCustom = { // this config uses ~30MB of memory
   numItems: 1000000,
   fpRate: 0.000000001, // one in a billion
   rotateTime: 1800000,
-  opaqueHeader: "X-Auth-Token" // adding header where to check opaque token.
+  opaqueHeader: "X-Auth-Token" // adding header where to check opaque token. (X-auth-api, etc)
 };
 
 const opaqueRevokerCustom = new Revoker(opaqueConfigCustom);
