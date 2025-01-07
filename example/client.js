@@ -23,29 +23,74 @@ const adminToken = jwt.sign({
 
 console.log(adminToken);
 
-// check access to protected route with valid JWT token
-const reqValid = await fetch('http://localhost:3000/protected', {
-  'headers': {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`,
-  },
-});
+// // check access to protected route with valid JWT token
+// const reqValid = await fetch('http://localhost:3000/protected', {
+//   'headers': {
+//     'Content-Type': 'application/json',
+//     'Authorization': `Bearer ${token}`,
+//   },
+// });
 
-const data = await reqValid.json();
-console.log('JWT valid token :' + data.message);
+// const data = await reqValid.json();
+// console.log('JWT valid token :' + data.message);
+
+// const token3 = jwt.sign({
+//   sub: '446655440000',
+//   fam: 'a716-446655440001',
+//   jti: '446655440015',
+//   name: 'John Doe',
+// }, process.env.JWT_SECRET_KEY, { expiresIn: '1h' });
+
+// console.log(token3);
+
+
+
+const tokens = [];
+for (let i = 0; i < 2000; i++) {
+  tokens.push(jwt.sign({
+    sub: '446655440000',
+    fam: 'a716-446655440001',
+    jti: '446655440015' + i,
+    name: 'John Doe',
+  }, process.env.JWT_SECRET_KEY, { expiresIn: '1h' }));
+}
+
 
 // revoke JWT token
-for (let i = 0; i < 100000; i++) {
-  const adminRevocation = await fetch('http://localhost:3000/revoke/jti/' + i, {
-    'method': 'POST',
-    'headers': {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${adminToken}`,
-    },
-  });
+// for (let i = 1000; i < 2000; i++) {
+//   const adminRevocation = await fetch('http://localhost:3000/revoke/jti/446655440015' + i, {
+//     'method': 'POST',
+//     'headers': {
+//       'Content-Type': 'application/json',
+//       'Authorization': `Bearer ${adminToken}`,
+//     },
+//   });
   // const data2 = await adminRevocation.json();
   // console.log('Revocation JWT' + data2.message);
+// }
+
+let invalid = 0;
+let valid = 0;
+
+// test if token is revoked
+for (let i = 0; i < 3000; i++) {
+
+  const reqInvalid = await fetch('http://localhost:3000/protected', {
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${tokens[i]}`,
+    },
+  });
+
+  if (reqInvalid.status === 401) {
+    invalid++;
+  } else {
+    valid++;
+  }
 }
+
+console.log('Invalid tokens: ' + invalid);
+console.log('Valid tokens: ' + valid);
 
 exit(0);
 
