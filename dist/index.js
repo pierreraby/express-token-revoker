@@ -1,22 +1,41 @@
 // @ts-check
 
-import { BloomFilterManager } from "./Bloom-filter-manager.js";
-
 /**
- * @typedef {import('express').Request} Request
- * @typedef {Request & { token?: any }} RequestWithToken
+ * @typedef {Object} JWTToken
+ * @property {string} [iss] - Issuer claim.
+ * @property {string} [sub] - Subject claim.
+ * @property {string} [aud] - Audience claim.
+ * @property {string} [exp] - Expiration time claim.
+ * @property {string} [nbf] - Not before claim.
+ * @property {string} [iat] - Issued at claim.
+ * @property {string} [jti] - JWT ID claim.
+ * @property {any} [anyOtherClaim] - Allows adding additional claims.
  */
 
 /**
+ * @typedef {import('express').Request & { token?: JWTToken }} RequestWithToken
+ */
+
+import { BloomFilterManager } from "./Bloom-filter-manager.js";
+
+/**
  * Middleware factory to check claims with the Bloom filter.
- * @param {Array<string>} claimsToCheck - List of claims to check.
+ * @param {string[]} claimsToCheck - List of claims to check.
  * @param {BloomFilterManager} bloomFilterManager - Instance of the Bloom filter manager.
  * @returns {import('express').RequestHandler} Middleware Express.
 */
 const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
+   /**
+   * Express middleware to validate JWT tokens against a Bloom filter.
+   * @param {import('express').Request} req - Express request object.
+   * @param {import('express').Response} res - Express response object.
+   * @param {import('express').NextFunction} next - Express next middleware function.
+   */
   return (req, res, next) => {
+
       /** @type {RequestWithToken} */
       const reqWithToken = req;
+
 
     try {
       if (!reqWithToken.token) {
@@ -36,10 +55,9 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
     } catch (error) {
       res.status(401).json({
         error: "invalid_token",
-        message: `Invalid token! ${error.message}`,
-        details: error.details || null,
+        //message: `Invalid token! ${error.message}`,
+        // details: error.details || null,
       });
-      throw error;
     }
   };
 };

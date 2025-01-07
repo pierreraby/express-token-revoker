@@ -1,21 +1,37 @@
 // @ts-check
 
 // Bloom filter manager class to manage multiple Bloom filters with rotation.
-import { BloomFilter } from 'bloomfilter';
+import { BloomFilter } from './bloomfilter.js';
 import fs from 'fs';
+import path from 'path';
+import { dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+// Define __filename and __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 /**
  * ExtendedBloomFilter extends the original BloomFilter type by including the static method withTargetError.
  * BloomFilter class does not define the withTargetError method.
  */
-/**
- * @typedef {typeof import('bloomfilter').BloomFilter & {
-*   withTargetError: (numItems: number, fpRate: number) => import('bloomfilter').BloomFilter
-* }} ExtendedBloomFilter
-*/
+// /**
+//  * @typedef {typeof import('bloomfilter').BloomFilter & {
+//  *  k: number
+// *   withTargetError: (numItems: number, fpRate: number) => import('bloomfilter').BloomFilter
+// * }} ExtendedBloomFilter
+// */
 
-/** @type {ExtendedBloomFilter} */
-const ExtendedBloomFilter = /** @type {ExtendedBloomFilter} */ (BloomFilter);
+
+// /** @type {ExtendedBloomFilter} */
+// const ExtendedBloomFilter = /** @type {ExtendedBloomFilter} */ (BloomFilter);
+
+// /**
+//  * @typedef {import('bloomfilter').BloomFilter & {
+// *   k: number | undefined
+// * }} BloomFilterWithK
+// */
+
 
 /**
  * @typedef {Object} BloomFilterOptions
@@ -24,6 +40,50 @@ const ExtendedBloomFilter = /** @type {ExtendedBloomFilter} */ (BloomFilter);
  * @property {number} rotateTime - Filter rotation interval in milliseconds.
  */
 export class BloomFilterManager {
+
+   /**
+   * @private
+   * @type {BloomFilter | null}
+   */
+   previous = null;
+
+   /**
+    * @private
+    * @type {BloomFilter | null}
+    */
+   current = null;
+ 
+   /**
+    * @private
+    * @type {BloomFilterOptions}
+    */
+   options;
+ 
+   /**
+    * @private
+    * @type {NodeJS.Timeout | null}
+    */
+   rotationInterval = null;
+ 
+   /**
+    * @private
+    * @type {NodeJS.Timeout | null}
+    */
+   backupInterval = null;
+
+  /**
+   * @private
+   * @type {number}
+   */
+    instanceId = 0;
+
+  /**
+   * @private
+   * @type {number}
+   */
+    static count = 0;
+
+
   /**
    * Creates an instance of BloomFilterManager.
    * @param {BloomFilterOptions} options - Bloom filter configuration.
@@ -42,6 +102,8 @@ export class BloomFilterManager {
       throw new Error('rotateTime must be a positive integer.');
     }
 
+    this.instanceId = BloomFilterManager.count++;
+    
     /** @private */
     this.numItems = numItems;
     /** @private */
@@ -53,29 +115,14 @@ export class BloomFilterManager {
       `Initializing BloomFilterManager with numItems=${this.numItems}, fpRate=${this.fpRate}, rotateTime=${this.rotateTime}`
     );
 
-    /**
-     * @private
-     * @type {BloomFilter | null}
-     */
-    this.previous = null; // Previous filter
+    this._ensureBackupDirExists();
 
-    /**
-     * @private
-     * @type {BloomFilter | null}
-     */
-    this.current = this._createBloomFilter(); // Current filter
+    this.current = this._createBloomFilter();
 
-    /**
-    /** @private
-     * @type {NodeJS.Timeout | null}
-     */
     this.rotationInterval = setInterval(() => this.rotate(), this.rotateTime);
+    this.backupInterval = setInterval(() => this.backup(), 5 * 60 * 1000); // Backup every 5 minutes
 
-    /**
-     * @private
-     * @type {NodeJS.Timeout | null}
-     * */
-    setInterval(() => this.backup(), 1 * 60 * 1000); // Backup every 5 minutes
+    this.restore();
   }
 
   /**
@@ -84,12 +131,28 @@ export class BloomFilterManager {
    * @returns {BloomFilter}
    */
   _createBloomFilter() {
-    return ExtendedBloomFilter.withTargetError(this.numItems, this.fpRate);
+    const newFilter = BloomFilter.withTargetError(this.numItems, this.fpRate);
+    return newFilter;
+  }
+
+  /**
+  * Ensures that the backup directory exists.
+  * @private
+  * @returns {void}
+  */
+   _ensureBackupDirExists() {
+    const backupDir = path.join(__dirname, '../backup');
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true });
+      console.log('Dossier de sauvegarde créé');
+    }
   }
 
   /**
    * Rotates the Bloom filters.
    * @private
+   * @returns {Promise<void>}
+   * @throws {Error} If an error occurs while rotating the filters.
    */
   async rotate() {
     try {
@@ -104,6 +167,7 @@ export class BloomFilterManager {
   /**
    * Adds a value to the current and next filters.
    * @param {string} value - The value to add.
+   * @returns {void}
    * @throws {TypeError} If the value is not a string.
    */
   add(value) {
@@ -122,6 +186,7 @@ export class BloomFilterManager {
    * Checks for the presence of a value in the current and previous Bloom filters.
    * @param {string} value - The value to check.
    * @returns {boolean} - `true` if the value might be present, `false` if it is definitely absent.
+   * @throws {TypeError} If the value is not a string.
    */
   has(value) {
     try {
@@ -138,16 +203,21 @@ export class BloomFilterManager {
    * Backup the current and previous filters.
    * @private
    * @returns {void}
+   * @throws {Error} If an error occurs while backing up the filters.
    */
   backup() {
     try {
       if (this.current) {
-        const buffer = Buffer.from(this.current.buckets.buffer); // Convertir en buffer
-        fs.writeFileSync('./backup/current.blob', buffer);
+        const buffer = Array.isArray(this.current.buckets)
+          ? Buffer.from(this.current.buckets)
+          : Buffer.from(this.current.buckets.buffer); // Convertir en buffer
+        fs.writeFileSync('./backup/current.blob' + this.instanceId, buffer);
       }
       if (this.previous) {
-        const buffer = Buffer.from(this.previous.buckets.buffer); // Convertir en buffer
-        fs.writeFileSync('./backup/previous.blob', buffer);
+        const buffer = Array.isArray(this.previous.buckets)
+          ? Buffer.from(this.previous.buckets)
+          : Buffer.from(this.previous.buckets.buffer);
+        fs.writeFileSync('./backup/previous.blob' + this.instanceId, buffer);
       }
       console.log('Backup done');
     } catch (error) {
@@ -157,22 +227,46 @@ export class BloomFilterManager {
 
   /**
    * Restore the current and previous filters.
+   * @private
+   * @returns {void}
+   * @throws {Error} If an error occurs while restoring the filters.
    */
-  // restore() {
-  //   try {
-  //     if (fs.existsSync('current.blob')) {
-  //     const buffer = fs.readFileSync(filePath);
-  //     const buckets = new Int32Array(buffer.buffer, buffer.byteOffset, buffer.length / Int32Array.BYTES_PER_ELEMENT);
-  //     //console.log(`Bloom filter restauré depuis le blob ${filePath}`);
-  //     return new BloomFilter(buckets, k);
-  //     console.log('Restore done');
-  //   } catch (error) {
-  //     console.error('Restore failed:', error);
-  //   }
+  restore() {
+    try {
+      const currentPath = path.join(__dirname, '../backup', 'current.blob' + this.instanceId);
+      const previousPath = path.join(__dirname, '../backup', 'previous.blob' + this.instanceId);
+      console.log(currentPath);
+
+      if (fs.existsSync(currentPath)) {
+
+      const buffer = fs.readFileSync(currentPath);
+      const buckets = new Int32Array(buffer.buffer, buffer.byteOffset, buffer.length / Int32Array.BYTES_PER_ELEMENT);
+      if (this.current) {
+        this.current = new BloomFilter(Array.from(buckets), this.current.k);
+      }
+      } else {
+        console.log('No current backup to restore for instance ' + this.instanceId);
+      }
+
+      if (fs.existsSync(previousPath)) {
+      const buffer2 = fs.readFileSync(previousPath);
+      const buckets2 = new Int32Array(buffer2.buffer, buffer2.byteOffset, buffer2.length / Int32Array.BYTES_PER_ELEMENT);
+      if (this.previous) {
+        this.previous = new BloomFilter(Array.from(buckets2), this.previous.k);
+      }
+      } else {
+        console.log('No previous backup to restore for instance ' + this.instanceId);
+      }
+    } catch (error) {
+      console.error('Restore failed:', error);
+    }
+  }
 
 
   /**
    * Resets the Bloom filters.
+   * @returns {Promise<void>}
+   * @throws {Error} If an error occurs while resetting the filters.
    */
   async reset() {
     try {
@@ -187,6 +281,7 @@ export class BloomFilterManager {
 
   /**
    * Stops the Bloom filter rotation interval.
+   * @returns {void}
    */
   stopRotation() {
     if (this.rotationInterval !== null) {
@@ -198,6 +293,7 @@ export class BloomFilterManager {
 
   /**
    * Cleans up resources when the instance is destroyed.
+   * @returns {void}
    */
   destroy() {
     this.stopRotation();
