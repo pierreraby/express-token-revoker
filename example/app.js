@@ -1,5 +1,7 @@
-// @ts-check
+/* @ts-check */
 import express from 'express';
+import logger from './logger.js';
+import client from 'prom-client';
 import { auth, admin } from './middlewares/auth.js';
 import {JWTrevoker, JWTfilter, opaqueRevoker, opaqueFilter,
         opaqueRevokerCustom, opaqueFilterCustom} from './middlewares/revoker.js';
@@ -8,6 +10,12 @@ const app = express();
 const port = process.env.PORT || 3000;;
 
 app.use(express.json());
+
+// Middleware de journalisation HTTP avec Pino
+// app.use((req, res, next) => {
+//   logger.info(`Requête reçue: ${req.method} ${req.url}`);
+//   next();
+// });
 
 // Public route protected by JWT filter
 app.get('/protected', auth, JWTfilter, (req, res) => {
@@ -56,6 +64,13 @@ app.post('/revoke3/:token', admin, JWTfilter, (req, res) => {
   } catch(error) {
     res.status(500).json({ message: `Error: ${ error }` });
   }
+});
+
+// Endpoint to expose Prometheus metrics
+app.get('/metrics', async (req, res) => {
+  const metrics = await client.register.metrics();
+  res.set('Content-Type', client.register.contentType);
+  res.end(metrics);
 });
 
 // Start the HTTP server

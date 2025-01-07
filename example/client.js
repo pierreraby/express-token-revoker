@@ -11,7 +11,7 @@ const token = jwt.sign({
   name: 'John Doe',
 }, process.env.JWT_SECRET_KEY, { expiresIn: '1h' });
 
-console.log(token);
+// console.log(token);
 
 const adminToken = jwt.sign({
   sub: '1234567890',
@@ -21,7 +21,7 @@ const adminToken = jwt.sign({
   admin: '987654321-1234567890',
 }, process.env.JWT_SECRET_KEY, { expiresIn: '1h' });
 
-console.log(adminToken);
+// console.log(adminToken);
 
 // // check access to protected route with valid JWT token
 // const reqValid = await fetch('http://localhost:3000/protected', {
@@ -55,25 +55,15 @@ for (let i = 0; i < 2000; i++) {
   }, process.env.JWT_SECRET_KEY, { expiresIn: '1h' }));
 }
 
-
-// revoke JWT token
-// for (let i = 1000; i < 2000; i++) {
-//   const adminRevocation = await fetch('http://localhost:3000/revoke/jti/446655440015' + i, {
-//     'method': 'POST',
-//     'headers': {
-//       'Content-Type': 'application/json',
-//       'Authorization': `Bearer ${adminToken}`,
-//     },
-//   });
-  // const data2 = await adminRevocation.json();
-  // console.log('Revocation JWT' + data2.message);
-// }
+console.log('Tokens created');
+console.log('Tokens length: ' + tokens.length);
+console.log('Verify valid tokens');
 
 let invalid = 0;
 let valid = 0;
 
 // test if token is revoked
-for (let i = 0; i < 3000; i++) {
+for (let i = 0; i < 2000; i++) {
 
   const reqInvalid = await fetch('http://localhost:3000/protected', {
     headers: {
@@ -91,6 +81,54 @@ for (let i = 0; i < 3000; i++) {
 
 console.log('Invalid tokens: ' + invalid);
 console.log('Valid tokens: ' + valid);
+console.log('Revoking tokens');
+
+// revoke JWT token
+for (let i = 0; i < 1000; i++) {
+  const adminRevocation = await fetch('http://localhost:3000/revoke/jti/446655440015' + i, {
+    'method': 'POST',
+    'headers': {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${adminToken}`,
+    },
+  });
+  // const data2 = await adminRevocation.json();
+  // console.log('Revocation JWT' + data2.message);
+  if (adminRevocation.status !== 200) {
+    console.log('Revocation JWT failed');
+  }
+}
+
+console.log('1000 tokens revoked');
+console.log('Verify tokens');
+
+invalid = 0;
+valid = 0;
+
+// test if token is revoked
+for (let i = 0; i < 2000; i++) {
+
+  const reqInvalid = await fetch('http://localhost:3000/protected', {
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${tokens[i]}`,
+    },
+  });
+
+  if (reqInvalid.status === 401) {
+    invalid++;
+  } else {
+    valid++;
+  }
+}
+
+console.log('Invalid tokens: ' + invalid);
+console.log('Valid tokens: ' + valid);
+
+// get metrics
+const reqMetrics = await fetch('http://localhost:3000/metrics');
+const metrics = await reqMetrics.text();
+console.log(metrics);
 
 exit(0);
 

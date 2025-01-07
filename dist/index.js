@@ -17,6 +17,13 @@
  */
 
 import { BloomFilterManager } from "./Bloom-filter-manager.js";
+import client from 'prom-client';
+import throttle from "lodash.throttle";
+
+const revokedJwtReplay = new client.Counter({
+  name: 'revoked_jwt_tokens',
+  help: 'Number of revoked JWT tokens',
+});
 
 /**
  * Middleware factory to check claims with the Bloom filter.
@@ -24,7 +31,10 @@ import { BloomFilterManager } from "./Bloom-filter-manager.js";
  * @param {BloomFilterManager} bloomFilterManager - Instance of the Bloom filter manager.
  * @returns {import('express').RequestHandler} Middleware Express.
 */
-const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
+const createJWTMiddleware = (claimsToCheck , bloomFilterManager, logger) => {
+
+  const throttleJWT = throttle((message) => logger.info(message), 60000);
+
    /**
    * Express middleware to validate JWT tokens against a Bloom filter.
    * @param {import('express').Request} req - Express request object.
@@ -39,28 +49,42 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
 
     try {
       if (!reqWithToken.token) {
+        logger.error("Missing jwt token");
         throw new Error("Missing jwt token");
       }
 
       for (const claim of claimsToCheck) {
         if (!reqWithToken.token[claim]) {
+          logger.warn(`Missing ${claim} claim in JWT token`);
           throw new Error(`Missing ${claim} claim in JWT token`);
         }
 
         if (bloomFilterManager.has(`${claim}-${reqWithToken.token[claim]}`)) {
+          revokedJwtReplay.inc();
+          if (process.env.NODE_ENV !== 'development') {
+            throttleJWT(`Token ${claim} is blacklisted`);
+          } else {
+            logger.info(`Token ${claim} is blacklisted`);
+          }
           throw new Error(`Token ${claim} is blacklisted`);
         }
       }
       next();
     } catch (error) {
+      logger.info(`Invalid token: ${error.message}`);
       res.status(401).json({
         error: "invalid_token",
-        //message: `Invalid token! ${error.message}`,
-        // details: error.details || null,
+        message: `Invalid token! ${error.message}`,
+        details: error.details || null,
       });
     }
   };
 };
+
+const revokedOpaqueReplay = new client.Counter({
+  name: 'revoked_opaque_tokens',
+  help: 'Number of revoked opaque tokens',
+});
 
 /**
  * Middleware factory to check opaque token with the Bloom filter.
@@ -68,11 +92,25 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
  * @param {BloomFilterManager} bloomFilterManager - Instance of the Bloom filter manager.
  * @returns {import('express').RequestHandler} Middleware Express.
  */
- const createOpaqueMiddleware = (header, bloomFilterManager) => {
+ const createOpaqueMiddleware = (header, bloomFilterManager, logger) => {
+
+  const throttleOpaque = throttle((message, logger) => logger.info(message), 60000);
+
+     /**
+   * Express middleware to validate JWT tokens against a Bloom filter.
+   * @param {import('express').Request} req - Express request object.
+   * @param {import('express').Response} res - Express response object.
+   * @param {import('express').NextFunction} next - Express next middleware function.
+   */
   return (req, res, next) => {
     try {
       const normalizedHeader = header.toLowerCase();
       if (!req.headers || !req.headers[normalizedHeader]) {
+        if (process.env.NODE_ENV !== 'development') {
+          throttleOpaque(`Missing header: ${header}`);
+        } else {
+          logger.warn(`Missing header: ${header}`);
+        }
         throw new Error(`Missing header: ${header}`);
       }
       
@@ -81,6 +119,11 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
         // @ts-ignore
         const parts = req.headers.authorization.split(" ");
         if (parts.length !== 2 || parts[0].toLowerCase() !== "bearer") {
+          if (process.env.NODE_ENV !== 'development') {
+            throttleOpaque('Invalid authorization header');
+          } else {
+            logger.warn('Invalid authorization header');
+          }
           throw new Error('Invalid authorization header');
         }
         token = parts[1];
@@ -88,10 +131,17 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
         token = req.headers[normalizedHeader];
       }
       if (typeof token === 'string' && bloomFilterManager.has(token)) {
+        revokedOpaqueReplay.inc();
+        if (process.env.NODE_ENV !== 'development') {
+          throttleOpaque(`Token ${token} is blacklisted`);
+        } else {
+          logger.info(`Token ${token} is blacklisted`);
+        }
         throw new Error(`Token is blacklisted`);
       }
       next();
     } catch (error) {
+      logger.info(`Invalid opaque token: ${error.message}`);
       res.status(401).json({
         error: "invalid_token",
         message: `Invalid token! ${error.message}`,
@@ -109,6 +159,7 @@ const createJWTMiddleware = (claimsToCheck , bloomFilterManager) => {
  * @property {number} numItems - Number of items to store in the Bloom filter.
  * @property {number} fpRate - Target false positive rate for the Bloom filter.
  * @property {number} rotateTime - Rotation interval in milliseconds.
+ * @property {import('pino').Logger} logger - Logger instance. 
 *
  * @typedef {ConfigBase & { claimsToCheck: Array<string>, opaqueHeader?: never }} JWTConfig
  * @typedef {ConfigBase & { opaqueHeader: string, claimsToCheck?: never }} OpaqueConfig
@@ -130,17 +181,18 @@ export class Revoker {
   middleware = null;
 
   constructor(config) {
-    const { numItems, fpRate, rotateTime, claimsToCheck, opaqueHeader } = config;
+    const { numItems, fpRate, rotateTime, claimsToCheck, opaqueHeader, logger } = config;
     this.bloomFilterManager = new BloomFilterManager({
       numItems,
       fpRate,
       rotateTime, // 30 minutes
+      logger
     });
 
     if (claimsToCheck) {
-      this.middleware = createJWTMiddleware(claimsToCheck , this.bloomFilterManager);
+      this.middleware = createJWTMiddleware(claimsToCheck , this.bloomFilterManager, logger);
     } else if (opaqueHeader) {
-      this.middleware = createOpaqueMiddleware(opaqueHeader, this.bloomFilterManager);
+      this.middleware = createOpaqueMiddleware(opaqueHeader, this.bloomFilterManager, logger);
     } else {
       this.bloomFilterManager.destroy();
       throw new Error("claimsToCheck or opaqueHeader must be provided");
@@ -178,6 +230,8 @@ export class Revoker {
     }
   }
 }
+
+export const counters = { revokedJwtReplay, revokedOpaqueReplay };
 
 
 
