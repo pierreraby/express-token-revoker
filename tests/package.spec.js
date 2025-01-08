@@ -139,42 +139,50 @@ test.group('BloomFilterManager Error Handling', (group) => {
     expect(consoleErrorSpy.firstCall.args[1].message).toBe('Test Error')
   })
 
-  test('backup method should create files when current and previous exist', ({ expect }) => {
+  test('backup previous method should not throw error when previousDone is false', ({ expect }) => {
     const writeFileSyncStub = sinon.stub(fs, 'writeFileSync')
     const loggerStub = { debug: sinon.stub(), error: sinon.stub() }
-  
-    // const manager = new BloomManager(loggerStub)
-    manager.instanceId = 'test123'
-    manager.current = { buckets: new Uint8Array([1,2,3]) }
-    manager.previous = { buckets: new Uint8Array([4,5,6]) }
-    manager.logger = loggerStub
-  
-    manager.backup()
-  
-    expect(writeFileSyncStub.calledTwice).toBe(true)
-    expect(writeFileSyncStub.firstCall.args[0]).toBe('./backup/current.blobtest123')
-    expect(writeFileSyncStub.secondCall.args[0]).toBe('./backup/previous.blobtest123')
-    expect(loggerStub.debug.calledTwice).toBe(true)
-    
+
+    manager.previousDone = false
+    manager.previous = null
+    manager.logger = loggerStub 
+    manager.backupPrevious()
+
+    expect(writeFileSyncStub.notCalled).toBe(true)
+    expect(loggerStub.debug.calledOnce).toBe(true)
+    expect(loggerStub.debug.calledWith('No previous filter to backup.')).toBe(true)
     writeFileSyncStub.restore()
   })
 
-  test('backup method should not create files when current and previous do not exist', ({ expect }) => {
+  test('backup current throw error if current filter not exist', ({ expect }) => {
     const writeFileSyncStub = sinon.stub(fs, 'writeFileSync')
     const loggerStub = { debug: sinon.stub(), error: sinon.stub() }
-  
-    // const manager = new BloomManager(loggerStub)
-    manager.instanceId = 'test123'
-    manager.logger = loggerStub
-  
-    manager.backup()
-  
+
+    manager.current = null
+    manager.logger = loggerStub 
+    manager.backupCurrent()
+
     expect(writeFileSyncStub.notCalled).toBe(true)
     expect(loggerStub.debug.notCalled).toBe(true)
-    expect(loggerStub.error.calledOnceWith('Backup failed:')).toBe(true)
-    
+    expect(loggerStub.error.calledWith('Backup failed:')).toBe(true)
     writeFileSyncStub.restore()
   })
+
+  test('backup previous throw error if previous filter not exist and previouDone is true', ({ expect }) => {
+    const writeFileSyncStub = sinon.stub(fs, 'writeFileSync')
+    const loggerStub = { debug: sinon.stub(), error: sinon.stub() }
+
+    manager.previous = null
+    manager.previousDone = true
+    manager.logger = loggerStub 
+    manager.backupPrevious()
+
+    expect(writeFileSyncStub.notCalled).toBe(true)
+    expect(loggerStub.debug.notCalled).toBe(true)
+    expect(loggerStub.error.calledWith('Backup failed:')).toBe(true)
+    writeFileSyncStub.restore()
+  })
+
 })
 
 test.group('BloomFilterManager Functional Tests', (group) => {
@@ -273,6 +281,65 @@ test.group('BloomFilterManager Functional Tests', (group) => {
     })
 
     manager.destroy()
+  })
+
+  test('backup method should create files when current and previous exist', ({ expect }) => {
+    const writeFileSyncStub = sinon.stub(fs, 'writeFileSync')
+    const loggerStub = { debug: sinon.stub(), error: sinon.stub() }
+  
+    // const manager = new BloomManager(loggerStub)
+    manager.instanceId = 'test123'
+    manager.current = { buckets: new Uint8Array([1,2,3]) }
+    manager.previous = { buckets: new Uint8Array([4,5,6]) }
+    manager.logger = loggerStub
+  
+    manager.backup()
+  
+    expect(writeFileSyncStub.calledTwice).toBe(true)
+    expect(writeFileSyncStub.firstCall.args[0]).toBe('./backup/current.blobtest123')
+    expect(writeFileSyncStub.secondCall.args[0]).toBe('./backup/previous.blobtest123')
+    expect(loggerStub.debug.calledTwice).toBe(true)
+    
+    writeFileSyncStub.restore()
+  })
+
+  test('backup current method should create file when current exists', ({ expect }) => {
+    const writeFileSyncStub = sinon.stub(fs, 'writeFileSync')
+    const loggerStub = { debug: sinon.stub(), error: sinon.stub() }
+  
+    // const manager = new BloomManager(loggerStub)
+    manager.instanceId = 'test123'
+    manager.current = { buckets: new Uint8Array([1,2,3]) }
+    manager.logger = loggerStub
+  
+    manager.backupCurrent()
+  
+    expect(writeFileSyncStub.calledOnce).toBe(true)
+    expect(writeFileSyncStub.firstCall.args[0]).toBe('./backup/current.blobtest123')
+    expect(loggerStub.debug.calledOnce).toBe(true)
+    expect(loggerStub.debug.calledWith('Backup done for current filter : test123')).toBe(true)
+    
+    writeFileSyncStub.restore()
+  })
+
+  test('backup previous method should create file when previous exists', ({ expect }) => {
+    const writeFileSyncStub = sinon.stub(fs, 'writeFileSync')
+    const loggerStub = { debug: sinon.stub(), error: sinon.stub() }
+  
+    // const manager = new BloomManager(loggerStub)
+    manager.instanceId = 'test123'
+    manager.previous = { buckets: new Uint8Array([1,2,3]) }
+    manager.logger = loggerStub
+    manager.previousDone = true
+  
+    manager.backupPrevious()
+  
+    expect(writeFileSyncStub.calledOnce).toBe(true)
+    expect(writeFileSyncStub.firstCall.args[0]).toBe('./backup/previous.blobtest123')
+    expect(loggerStub.debug.calledOnce).toBe(true)
+    expect(loggerStub.debug.calledWith('Backup done for previous filter : test123')).toBe(true)
+    
+    writeFileSyncStub.restore()
   })
 })
 

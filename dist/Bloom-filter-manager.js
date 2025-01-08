@@ -85,6 +85,12 @@ export class BloomFilterManager {
   logger;
 
   /**
+   * @private
+   * @type {boolean}
+   * */
+  previousDone
+
+  /**
    * Creates an instance of BloomFilterManager.
    * @param {BloomFilterOptions} options - Bloom filter configuration.
    */
@@ -112,6 +118,9 @@ export class BloomFilterManager {
     this.rotateTime = rotateTime;
     /** @private */
     this.logger = logger;
+    /** @private */
+    this.previousDone = false; 
+
 
     this.logger.info(
       `Initializing BloomFilterManager with numItems=${this.numItems}, fpRate=${this.fpRate}, rotateTime=${this.rotateTime}`
@@ -157,6 +166,9 @@ export class BloomFilterManager {
    */
   rotate() {
     try {
+      if (!this.previousDone) {
+        this.previousDone = true;
+      }
       this.logger.debug('Rotating Bloom filters...');
       this.previous = this.current;
       this.current = this._createBloomFilter();
@@ -200,6 +212,54 @@ export class BloomFilterManager {
         return false;
     }
   }
+
+  /**
+   * Backup the current filter.
+   * @private
+   * @returns {void}
+   * @throws {Error} If an error occurs while backing up the filter.
+   */
+  backupCurrent() {
+    try {
+      if (this.current) {
+        const buffer = Array.isArray(this.current.buckets)
+          ? Buffer.from(this.current.buckets)
+          : Buffer.from(this.current.buckets.buffer);
+        fs.writeFileSync('./backup/current.blob' + this.instanceId, buffer);
+        this.logger.debug('Backup done for current filter : ' + this.instanceId);
+      } else {
+        throw new Error('No current filter to backup.');
+      }
+    } catch (error) {
+      this.logger.error('Backup failed:', error);
+    }
+  }
+
+  /**
+   * Backup the previous filter.
+   * @private
+   * @returns {void}
+   * @throws {Error} If an error occurs while backing up the filter.
+   */
+  backupPrevious() {
+    try {
+      if (this.previous) {
+        const buffer = Array.isArray(this.previous.buckets)
+          ? Buffer.from(this.previous.buckets)
+          : Buffer.from(this.previous.buckets.buffer);
+        fs.writeFileSync('./backup/previous.blob' + this.instanceId, buffer);
+        this.logger.debug('Backup done for previous filter : ' + this.instanceId);
+      } else if (!this.previousDone) {
+        this.logger.debug('No previous filter to backup.');
+        return;
+      } else {
+        throw new Error('No previous filter to backup.');
+      }
+    } catch (error) {
+      this.logger.error('Backup failed:', error);
+    }
+  }
+
   /**
    * Backup the current and previous filters.
    * @private
@@ -207,24 +267,8 @@ export class BloomFilterManager {
    * @throws {Error} If an error occurs while backing up the filters.
    */
   backup() {
-    try {
-      if (this.current) {
-        const buffer = Array.isArray(this.current.buckets)
-          ? Buffer.from(this.current.buckets)
-          : Buffer.from(this.current.buckets.buffer); // Convertir en buffer
-        fs.writeFileSync('./backup/current.blob' + this.instanceId, buffer);
-        this.logger.debug('Backup done for current filter :' + this.instanceId);
-      }
-      if (this.previous) {
-        const buffer = Array.isArray(this.previous.buckets)
-          ? Buffer.from(this.previous.buckets)
-          : Buffer.from(this.previous.buckets.buffer);
-        fs.writeFileSync('./backup/previous.blob' + this.instanceId, buffer);
-        this.logger.debug('Backup done for previous filter :' + this.instanceId);
-      }
-    } catch (error) {
-      this.logger.error('Backup failed:', error);
-    }
+    this.backupCurrent();
+    this.backupPrevious();
   }
 
   /**
