@@ -213,14 +213,15 @@ export class BloomFilterManager {
           ? Buffer.from(this.current.buckets)
           : Buffer.from(this.current.buckets.buffer); // Convertir en buffer
         fs.writeFileSync('./backup/current.blob' + this.instanceId, buffer);
+        this.logger.debug('Backup done for current filter :' + this.instanceId);
       }
       if (this.previous) {
         const buffer = Array.isArray(this.previous.buckets)
           ? Buffer.from(this.previous.buckets)
           : Buffer.from(this.previous.buckets.buffer);
         fs.writeFileSync('./backup/previous.blob' + this.instanceId, buffer);
+        this.logger.debug('Backup done for previous filter :' + this.instanceId);
       }
-      this.logger.debug('Backup done');
     } catch (error) {
       this.logger.error('Backup failed:', error);
     }

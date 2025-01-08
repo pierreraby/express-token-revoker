@@ -7,6 +7,8 @@ import { dirname, join } from 'path'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { log } from 'console'
+import logger from '../example/logger.js'
+import exp from 'constants'
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -136,6 +138,43 @@ test.group('BloomFilterManager Error Handling', (group) => {
     expect(consoleErrorSpy.firstCall.args[0]).toBe('Error in has:')
     expect(consoleErrorSpy.firstCall.args[1].message).toBe('Test Error')
   })
+
+  test('backup method should create files when current and previous exist', ({ expect }) => {
+    const writeFileSyncStub = sinon.stub(fs, 'writeFileSync')
+    const loggerStub = { debug: sinon.stub(), error: sinon.stub() }
+  
+    // const manager = new BloomManager(loggerStub)
+    manager.instanceId = 'test123'
+    manager.current = { buckets: new Uint8Array([1,2,3]) }
+    manager.previous = { buckets: new Uint8Array([4,5,6]) }
+    manager.logger = loggerStub
+  
+    manager.backup()
+  
+    expect(writeFileSyncStub.calledTwice).toBe(true)
+    expect(writeFileSyncStub.firstCall.args[0]).toBe('./backup/current.blobtest123')
+    expect(writeFileSyncStub.secondCall.args[0]).toBe('./backup/previous.blobtest123')
+    expect(loggerStub.debug.calledTwice).toBe(true)
+    
+    writeFileSyncStub.restore()
+  })
+
+  test('backup method should not create files when current and previous do not exist', ({ expect }) => {
+    const writeFileSyncStub = sinon.stub(fs, 'writeFileSync')
+    const loggerStub = { debug: sinon.stub(), error: sinon.stub() }
+  
+    // const manager = new BloomManager(loggerStub)
+    manager.instanceId = 'test123'
+    manager.logger = loggerStub
+  
+    manager.backup()
+  
+    expect(writeFileSyncStub.notCalled).toBe(true)
+    expect(loggerStub.debug.notCalled).toBe(true)
+    expect(loggerStub.error.calledOnceWith('Backup failed:')).toBe(true)
+    
+    writeFileSyncStub.restore()
+  })
 })
 
 test.group('BloomFilterManager Functional Tests', (group) => {
@@ -146,6 +185,7 @@ test.group('BloomFilterManager Functional Tests', (group) => {
       numItems: 1000,
       fpRate: 0.0001,
       rotateTime: 1000, // 1 second for testing
+      logger: console
     })
   })
 
@@ -182,9 +222,9 @@ test.group('BloomFilterManager Functional Tests', (group) => {
     expect(manager.has('nonExistent')).toBe(false)
   })
 
-  test('reset method clears the Bloom filters', async ({expect}) => {
+  test('reset method clears the Bloom filters', ({expect}) => {
     manager.add('testValue')
-    await manager.reset()
+    manager.reset()
     expect(manager.has('testValue')).toBe(false)
   })
 
@@ -214,6 +254,7 @@ test.group('BloomFilterManager Functional Tests', (group) => {
       numItems: 1000,
       fpRate: 0.0001,
       rotateTime: 20,
+      logger: console
     })
     const tokens = ['alpha', 'beta', 'gamma']
     tokens.forEach((token) => manager.add(token))
@@ -235,66 +276,62 @@ test.group('BloomFilterManager Functional Tests', (group) => {
   })
 })
 
-// test.group('BloomFilterManager _ensureBackupDirExists', (group) => {
-//   let manager
-//   let existsSyncStub
-//   let mkdirSyncStub
-//   let consoleLogSpy
+test.group('BloomFilterManager _ensureBackupDirExists', (group) => {
+  let manager
+  let existsSyncStub
+  let mkdirSyncStub
+  let consoleLogSpy
 
-//   group.setup(() => {
-//     if (fs.existsSync(backupDir)) {
-//       fs.rmSync(backupDir, { recursive: true, force: true });
-//     }
+  group.setup(() => {
+    consoleLogSpy = sinon.spy()
+    
+    // On fournit un logger qui contient debug:
+    manager = new BloomFilterManager({
+      numItems: 1000,
+      fpRate: 0.0001,
+      rotateTime: 2000,
+      logger: {
+        debug: consoleLogSpy,
+        info: console.log,
+        warn: console.warn,
+        error: console.error
+      }
+    })
+  
+    existsSyncStub = sinon.stub(fs, 'existsSync')
+    mkdirSyncStub = sinon.stub(fs, 'mkdirSync')
+  })
 
-//     manager = new BloomFilterManager({
-//       numItems: 1000,
-//       fpRate: 0.0001,
-//       rotateTime: 20,
-//     })
-//     existsSyncStub = sinon.stub(fs, 'existsSync')
-//     mkdirSyncStub = sinon.stub(fs, 'mkdirSync')
-//     consoleLogSpy = sinon.spy(console, 'log')
-//   })
+  group.teardown(() => {
+    sinon.restore()
+    manager.destroy()
+  })
 
-//   group.teardown(() => {
-//     sinon.restore()
-//     manager.destroy()
-//   })
+  test('should create backup directory and log message when it does not exist', ({ expect }) => {
+    // Arrange
+    existsSyncStub.returns(false)
+    consoleLogSpy.resetHistory();
+    manager._ensureBackupDirExists()
+    const expectedBackupDir = join(__dirname, '../backup')
 
-//   test('should create backup directory and log message when it does not exist', ({ expect }) => {
-//     // Arrange
-//     existsSyncStub.returns(false)
+    expect(existsSyncStub.calledOnceWithExactly(expectedBackupDir)).toBe(true)
+    expect(mkdirSyncStub.calledOnceWithExactly(expectedBackupDir, { recursive: true })).toBe(true)
+    expect(consoleLogSpy.calledOnceWithExactly('Dossier de sauvegarde créé')).toBe(true)
+  })
 
-//     consoleLogSpy.resetHistory();
+  test('should not create backup directory or log message when it already exists', ({ expect }) => {
+    existsSyncStub.resetHistory()
+    mkdirSyncStub.resetHistory()
+    consoleLogSpy.resetHistory();
+    existsSyncStub.returns(true)
+    manager._ensureBackupDirExists()
+    const expectedBackupDir = path.join(__dirname, '../backup')
 
-//     // Act
-//     manager._ensureBackupDirExists()
-
-//     console.log('consoleLogSpy call count:', consoleLogSpy.callCount);
-//     console.log('consoleLogSpy first call args:', consoleLogSpy.getCall(0).args);
-
-
-//     // Assert
-//     const expectedBackupDir = join(__dirname, '../backup')
-//     expect(existsSyncStub.calledOnceWithExactly(expectedBackupDir)).toBe(true)
-//     expect(mkdirSyncStub.calledOnceWithExactly(expectedBackupDir, { recursive: true })).toBe(true)
-//     expect(consoleLogSpy.calledOnceWithExactly('Dossier de sauvegarde créé')).(true)
-//   })
-
-//   test('should not create backup directory or log message when it already exists', ({ expect }) => {
-//     // Arrange
-//     existsSyncStub.returns(true)
-
-//     // Act
-//     manager._ensureBackupDirExists()
-
-//     // Assert
-//     const expectedBackupDir = path.join(__dirname, '../backup')
-//     expect(existsSyncStub.calledOnceWithExactly(expectedBackupDir)).to.be.true
-//     expect(mkdirSyncStub.notCalled).to.be.true
-//     expect(consoleLogSpy.notCalled).to.be.true
-//   })
-// })
+    expect(existsSyncStub.calledOnceWithExactly(expectedBackupDir)).toBe(true)
+    expect(mkdirSyncStub.notCalled).toBe(true)
+    expect(consoleLogSpy.notCalled).toBe(true)
+  })
+})
 
 test.group('Revoker Class Tests', (group) => {
   let destroySpy
@@ -415,7 +452,7 @@ test.group('Revoker Error Handling', (group) => {
       fpRate: 0.01,
       rotateTime: 1000,
       claimsToCheck: ['claim1', 'claim2'],
-      looger: console
+      logger: console
     });
     revoker.middleware = null
     expect(() => revoker.getMiddleware()).toThrow('Middleware not configured');
@@ -425,39 +462,40 @@ test.group('Revoker Error Handling', (group) => {
 
 test.group('Revoker Functional Tests', (group) => {
 
-test('createJWTMiddleware correctly checks claimsToCheck', async ({ expect }) => {
-  const revoker = new Revoker({
-    numItems: 1000,
-    fpRate: 0.01,
-    rotateTime: 1000,
-    claimsToCheck: ['claim1', 'claim2']
-  });
-  
-  const middleware = revoker.getMiddleware();
-  const next = sinon.spy();
-  const req = {
-    token: {
-      claim1: 'value1',
-      claim2: 'value2'
+  test('createJWTMiddleware correctly checks claimsToCheck', async ({ expect }) => {
+    const revoker = new Revoker({
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 1000,
+      claimsToCheck: ['claim1', 'claim2'],
+      logger:  console
+    });
+    
+    const middleware = revoker.getMiddleware();
+    const next = sinon.spy();
+    const req = {
+      token: {
+        claim1: 'value1',
+        claim2: 'value2'
+      }
     }
-  }
 
-  const res = {
-    status: sinon.stub().returnsThis(),
-    json: sinon.stub(),
-    send: sinon.stub()
-  };
-  
-  middleware(req, res, next);
-  
-  expect(next.calledOnce).toBe(true);
-  expect(next.firstCall.args[0]).toBeUndefined();
-  
-  expect(res.status.notCalled).toBe(true);
-  expect(res.json.notCalled).toBe(true);
-  expect(res.send.notCalled).toBe(true);
-  revoker.destroy();
-  });
+    const res = {
+      status: sinon.stub().returnsThis(),
+      json: sinon.stub(),
+      send: sinon.stub()
+    };
+    
+    middleware(req, res, next);
+    
+    expect(next.calledOnce).toBe(true);
+    expect(next.firstCall.args[0]).toBeUndefined();
+    
+    expect(res.status.notCalled).toBe(true);
+    expect(res.json.notCalled).toBe(true);
+    expect(res.send.notCalled).toBe(true);
+    revoker.destroy();
+    });
 
   // test('createJWTMiddleware throws error when token is missing', ({expect}) => {
   //   const req = {};
@@ -550,7 +588,8 @@ test('createJWTMiddleware correctly checks claimsToCheck', async ({ expect }) =>
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
-      opaqueHeader: 'Authorization'
+      opaqueHeader: 'Authorization',
+      logger: console
     });
     const createOpaqueMiddleware = revoker.getMiddleware();
 
@@ -576,7 +615,8 @@ test('createJWTMiddleware correctly checks claimsToCheck', async ({ expect }) =>
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
-      opaqueHeader: 'Authorization'
+      opaqueHeader: 'Authorization',
+      logger: console
     });
     const createOpaqueMiddleware = revoker.getMiddleware();
 
@@ -602,7 +642,8 @@ test('createJWTMiddleware correctly checks claimsToCheck', async ({ expect }) =>
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
-      opaqueHeader: 'X-Auth-Token'
+      opaqueHeader: 'X-Auth-Token',
+      logger: console
     });
     const createOpaqueMiddleware = revoker.getMiddleware();
 
@@ -629,7 +670,8 @@ test('createJWTMiddleware correctly checks claimsToCheck', async ({ expect }) =>
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
-      opaqueHeader: 'Authorization'
+      opaqueHeader: 'Authorization',
+      logger: console
     });
     const createOpaqueMiddleware = revoker.getMiddleware();
 
@@ -651,7 +693,8 @@ test('createJWTMiddleware correctly checks claimsToCheck', async ({ expect }) =>
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
-      opaqueHeader: 'Authorization'
+      opaqueHeader: 'Authorization',
+      logger: console
     });
     const createOpaqueMiddleware = revoker.getMiddleware();
     const token = 'testToken'
@@ -681,7 +724,8 @@ test('createJWTMiddleware correctly checks claimsToCheck', async ({ expect }) =>
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
-      opaqueHeader: 'X-Auth-Token'
+      opaqueHeader: 'X-Auth-Token',
+      logger: console
     });
     const createOpaqueMiddleware = revoker.getMiddleware();
     const token = 'testToken'
@@ -704,7 +748,8 @@ test('createJWTMiddleware correctly checks claimsToCheck', async ({ expect }) =>
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
-      opaqueHeader: 'Authorization'
+      opaqueHeader: 'Authorization',
+      logger: console
     });
 
     const middleware = revoker.getMiddleware();
