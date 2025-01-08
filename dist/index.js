@@ -18,7 +18,7 @@
 
 import { BloomFilterManager } from "./Bloom-filter-manager.js";
 import client from 'prom-client';
-import throttle from "lodash.throttle";
+import throttle from "throttleit";
 
 const revokedJwtReplay = new client.Counter({
   name: 'revoked_jwt_tokens',
@@ -29,12 +29,11 @@ const revokedJwtReplay = new client.Counter({
  * Middleware factory to check claims with the Bloom filter.
  * @param {string[]} claimsToCheck - List of claims to check.
  * @param {BloomFilterManager} bloomFilterManager - Instance of the Bloom filter manager.
+ * @param {import('pino').Logger} logger - Logger instance.
+ * @param {Function} throttleJWT - Throttle function.
  * @returns {import('express').RequestHandler} Middleware Express.
 */
-const createJWTMiddleware = (claimsToCheck , bloomFilterManager, logger) => {
-
-  const throttleJWT = throttle((message) => logger.info(message), 60000);
-
+const createJWTMiddleware = (claimsToCheck , bloomFilterManager, logger, throttleJWT) => {
    /**
    * Express middleware to validate JWT tokens against a Bloom filter.
    * @param {import('express').Request} req - Express request object.
@@ -90,13 +89,12 @@ const revokedOpaqueReplay = new client.Counter({
  * Middleware factory to check opaque token with the Bloom filter.
  * @param {string} header - The header to check.
  * @param {BloomFilterManager} bloomFilterManager - Instance of the Bloom filter manager.
+ * @param {import('pino').Logger} logger - Logger instance.
+ * @param {Function} throttleOpaque - Throttle function.
  * @returns {import('express').RequestHandler} Middleware Express.
  */
- const createOpaqueMiddleware = (header, bloomFilterManager, logger) => {
-
-  const throttleOpaque = throttle((message, logger) => logger.info(message), 60000);
-
-     /**
+ const createOpaqueMiddleware = (header, bloomFilterManager, logger, throttleOpaque) => {
+  /**
    * Express middleware to validate JWT tokens against a Bloom filter.
    * @param {import('express').Request} req - Express request object.
    * @param {import('express').Response} res - Express response object.
@@ -154,32 +152,41 @@ const revokedOpaqueReplay = new client.Counter({
 
 /**
  * @typedef {import('express').RequestHandler} RequestHandler
-*
- * @typedef {Object} ConfigBase
- * @property {number} numItems - Number of items to store in the Bloom filter.
- * @property {number} fpRate - Target false positive rate for the Bloom filter.
- * @property {number} rotateTime - Rotation interval in milliseconds.
- * @property {import('pino').Logger} logger - Logger instance. 
-*
- * @typedef {ConfigBase & { claimsToCheck: Array<string>, opaqueHeader?: never }} JWTConfig
- * @typedef {ConfigBase & { opaqueHeader: string, claimsToCheck?: never }} OpaqueConfig
- * @typedef {JWTConfig | OpaqueConfig} Config
- */
+*/
 
 /**
  * Revoker class to manage middleware and adding items to the Bloom filter.
  */
 export class Revoker {
-/**
-   * @param {Config} config - Configuration options.
-   * @throws {Error} If neither `claimsToCheck` nor `opaqueHeader` is provided.
-   */
+  
   /** @type {BloomFilterManager | null} */
   bloomFilterManager = null;
 
   /** @type {RequestHandler | null} */
   middleware = null;
 
+  /** @type {Function} */
+  throttleJWT = () => {};
+
+  /** @type {Function} */
+  throttleOpaque = () => {};
+
+  /**
+   * @typedef {Object} ConfigBase
+   * @property {number} numItems - Number of items to store in the Bloom filter.
+   * @property {number} fpRate - Target false positive rate for the Bloom filter.
+   * @property {number} rotateTime - Rotation interval in milliseconds.
+   * @property {import('pino').Logger} logger - Logger instance. 
+   *
+   * @typedef {ConfigBase & { claimsToCheck: Array<string>, opaqueHeader?: never }} JWTConfig
+   * @typedef {ConfigBase & { opaqueHeader: string, claimsToCheck?: never }} OpaqueConfig
+   * @typedef {JWTConfig | OpaqueConfig} Config
+   */
+
+  /**
+   * @param {Config} config - Configuration options.
+   * @throws {Error} If neither `claimsToCheck` nor `opaqueHeader` is provided.
+   */
   constructor(config) {
     const { numItems, fpRate, rotateTime, claimsToCheck, opaqueHeader, logger } = config;
     this.bloomFilterManager = new BloomFilterManager({
@@ -189,10 +196,13 @@ export class Revoker {
       logger
     });
 
+    this.throttleJWT = throttle((message) => logger.info(message), 60000);
+    this.throttleOpaque = throttle((message) => logger.info(message), 60000);
+
     if (claimsToCheck) {
-      this.middleware = createJWTMiddleware(claimsToCheck , this.bloomFilterManager, logger);
+      this.middleware = createJWTMiddleware(claimsToCheck , this.bloomFilterManager, logger, this.throttleJWT);
     } else if (opaqueHeader) {
-      this.middleware = createOpaqueMiddleware(opaqueHeader, this.bloomFilterManager, logger);
+      this.middleware = createOpaqueMiddleware(opaqueHeader, this.bloomFilterManager, logger, this.throttleOpaque);
     } else {
       this.bloomFilterManager.destroy();
       throw new Error("claimsToCheck or opaqueHeader must be provided");
@@ -226,7 +236,7 @@ export class Revoker {
   destroy() {
     if (this.bloomFilterManager) {
       this.bloomFilterManager.destroy();
-      this.bloomFilterManager = null; 
+      this.bloomFilterManager = null;
     }
   }
 }
