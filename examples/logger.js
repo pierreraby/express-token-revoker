@@ -1,6 +1,7 @@
 import pino from 'pino';
 
 const env = process.env.NODE_ENV || 'development';
+process.env.LOG_LEVEL = 'debug';
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',

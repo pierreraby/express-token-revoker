@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { Mutex } from 'async-mutex';
 
 // Define __filename and __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -19,8 +20,6 @@ const __dirname = dirname(__filename)
  * @property {function(...any): void} debug - Log a debug message
  * @property {function(...any): void} trace - Log a trace message
  */
-
-// @property {GenericLogger} logger - Any logger implementing the basic logging methods
 
 /**
  * @typedef {Object} BloomFilterOptions
@@ -61,7 +60,7 @@ export class BloomFilterManager {
    * @type {number}
    */
   instanceId;
-  
+
   /**
    * @private
    * @type {GenericLogger}
@@ -98,22 +97,17 @@ export class BloomFilterManager {
    */
   backupTempFilePath;
 
+   /**
+   * @private
+   * @type {Mutex}
+   */
+   mutex
+
   /**
    * @private
    * @type {number}
    */
     static count = 1;
-
-  /**
-   * Enum representing the possible filter names.
-   * @readonly
-   * @type {{current: 'current', previous: 'previous', all: 'all'}}
-   */
-    filterName = Object.freeze({
-      current: 'current',
-      previous: 'previous',
-      all: 'all',
-    });
 
   /**
    * Creates an instance of BloomFilterManager.
@@ -137,7 +131,7 @@ export class BloomFilterManager {
     }
 
     this.instanceId = BloomFilterManager.count++;
-    
+
     /** @private */
     this.numItems = numItems;
     /** @private */
@@ -148,7 +142,8 @@ export class BloomFilterManager {
     this.logger = logger;
     /** @private */
     this.previousDone = false;
-
+    /** @private */
+    this.mutex = new Mutex();
 
     this.logger.info(
       `Initializing BloomFilterManager with numItems=${this.numItems}, fpRate=${this.fpRate}, rotateTime=${this.rotateTime}`
@@ -157,26 +152,45 @@ export class BloomFilterManager {
     this.current = this.#createBloomFilter();
 
     this.rotationInterval = setInterval(() => this.#rotate(), this.rotateTime);
-    this.backupInterval = setInterval(() => this.#backup(), 60 * 60 * 1000); // Backup every 5 minutes
+    this.backupInterval = setInterval(() => this.#backup(), 2 * 60 * 1000); // Backup every 5 minutes
 
     this.backupDir = path.join(__dirname, '../backup');
     this.backupCurrentPath = path.join(this.backupDir, `current-${this.instanceId}.blob`);
     this.backupPreviousPath = path.join(this.backupDir, `previous-${this.instanceId}.blob`);
     this.backupTempFilePath = path.join(this.backupDir, `temp-${this.instanceId}.txt`);
 
-    this.#ensureBackupDirExists();
+    this.#init();
 
-    const isFirstStart = this.#isFirstStart();
-
-    this.#restore(isFirstStart);
   }
 
   // Note: not testing private methods
   /* c8 ignore start */
 
-  #isFirstStart() {
+  /**
+   * 
+   */
+  async #init() {
+    // asynchrone initialization
+    await this.#ensureBackupDirExists();
+    const isFirstStart = await this.#isFirstStart();
+    if (!isFirstStart) {
+      await this.#restore();
+    }
+    this.#startRotationAndBackupIntervals();
+  }
+
+  /**
+   * Initializes the timer intervals for filter rotation and backup.
+   * @returns {void}
+   * */
+  #startRotationAndBackupIntervals() {
+    this.rotationInterval = setInterval(() => this.#rotate(), this.rotateTime);
+    this.backupInterval = setInterval(() => this.#backup(), 5 * 60 * 1000); // Backup every 5 minutes
+  }
+
+  async #isFirstStart() {
     try {
-        const files = fs.readdirSync(this.backupDir);
+      const files = await fs.promises.readdir(this.backupDir);
         return files.length === 0; // Si le répertoire est vide, c'est le premier démarrage
     } catch (error) {
         this.logger.error('Error checking if first start:', error);
@@ -195,46 +209,62 @@ export class BloomFilterManager {
 
   /**
   * Ensures that the backup directory exists.
-  * @returns {void}
+  * @returns {Promise<void>}
   */
-   #ensureBackupDirExists() {
-    //const backupDir = path.join(__dirname, '../backup');
-    if (!fs.existsSync(this.backupDir)) {
-      fs.mkdirSync(this.backupDir);
-      this.logger.debug('Backup directory created');
+  async #ensureBackupDirExists() {
+    try {
+      await fs.promises.access(this.backupDir);
+      this.logger.debug('Backup directory already exists.');
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        await fs.promises.mkdir(this.backupDir, { recursive: true });
+        this.logger.debug('Backup directory created.');
+      } else {
+        this.logger.error('Error accessing or creating backup directory:', error);
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Checks if the temp file exists and is not empty.   *
+   * @returns {Promise<boolean>} - `true` if the temp file exists and is not empty, `false` otherwise.
+   */
+  async #tempFileExistsAndNotEmpty() {
+    try {
+      const stats = await fs.promises.stat(this.backupTempFilePath);
+      return stats.size > 0;
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return false;
+      }
+      this.logger.error('Error checking if temp file exists and is not empty:', error);
+      return false;
     }
   }
 
   /**
    * Backup one or all filters to local storage.
-   * @param {keyof typeof this.filterName} filterName - The name of the filter to restore: 'current', 'previous', or 'all' for both.
+   * @param {string} filterName - The name of the filter to backup: 'current', 'previous', or 'all' for both.
    * @returns {Promise<void>}
    * @throws {Error} If an error occurs while backing up the filter(s).
    */
-  async #backupLocal(filterName = this.filterName.all) {
+  async #backupLocal(filterName = "all") {
     try {
       // Validate filterName parameter
-      const validFilters = [this.filterName.current, this.filterName.previous, this.filterName.all];
+      const validFilters = ["current", "previous", "all"];
       if (!validFilters.includes(filterName)) {
         throw new Error("filterName parameter must be either 'current', 'previous', or 'all'");
       }
 
-      /** @type {(keyof typeof this.filterName)[]} */
-      const filtersToBackup = 
-        filterName === this.filterName.all
-        ? [this.filterName.current, this.filterName.previous]
-        : [filterName];
+      const filtersToBackup = filterName === "all" ? ["current", "previous"] : [filterName];
 
       for (const name of filtersToBackup) {
         const filter = this[name];
-        const filePath =
-          name === this.filterName.current
-            ? this.backupCurrentPath
-            : this.backupPreviousPath;
+        const filePath = name === "current" ? this.backupCurrentPath : this.backupPreviousPath;
 
-
-        // Skip previous filter backup if not needed
-        if (name === this.filterName.previous && !filter && !this.previousDone) {
+        // Skip previous filter backup if not needed before first rotation
+        if (name === "previous" && !filter) {
           this.logger.debug('No previous filter to backup.');
           continue;
         }
@@ -249,142 +279,124 @@ export class BloomFilterManager {
 
         this.logger.debug(`Saved ${name} filter : id ${this.instanceId}`);
       }
-      if (this.backupTempFilePath && fs.existsSync(this.backupTempFilePath)) {
-        fs.unlinkSync(this.backupTempFilePath);
-      }
+
+      await fs.promises.writeFile(this.backupTempFilePath, '');
+      this.logger.debug(`Temp file cleared for instance : id ${this.instanceId}`);
     } catch (error) {
       this.logger.error(`Backup failed: ${error.message}`);
       throw error;
     }
   }
-  
+
   /**
    * Backup the current and previous filters.
-   * @returns {void}
+   * @returns {Promise<void>}
    * @throws {Error} If an error occurs while backing up the filters.
    */
-  #backup() {
-    // this.backupLocal('current');
-    // this.backupLocal('previous');
-    this.#backupLocal('all');
+  async #backup() {
+    const release = await this.mutex.acquire();
+    try {
+      this.#backupLocal('all');
+    } finally {
+      release();
+    }
   }
-  
-  /**
-   * Restore items from temp file to current filter.
+
+    /**
+   * Restaure les éléments depuis le fichier temporaire vers le filtre actuel.
    * @returns {Promise<void>}
-   * @throws {Error} If an error occurs while restoring the items.
    */
   async #restoreTemp() {
     try {
-      const data = await fs.promises.readFile(this.backupTempFilePath, 'utf8');
-      const restoredItems = data.split('\n');
-      // Add each item to the current filter
-      restoredItems.forEach((item) => {
-        if (item.trim() !== '') {
-            try {
-                this.current?.add(item);
-            } catch (error) {
-                this.logger.error(`Error adding item '${item}' to filter: ${error.message}`);
-            }
-        }
-      });
-    } catch (error) {
-      if (error.code === 'ENOENT') {
-        throw new Error(`Backup file not found: ${this.backupTempFilePath}`);
-            } else if (error instanceof TypeError) {
-        throw new Error(`'current' is not defined or does not have an 'add' method`);
+      const fileContent = await fs.promises.readFile(this.backupTempFilePath, 'utf8');
+      const lines = fileContent.split('\n');
+      
+      for (const line of lines) {
+        if (line.trim()) {
+          try {
+            if (this.current) {
+              this.current.add(line);
             } else {
-        throw new Error(`Error restoring filters: ${error.message}`);
+              this.logger.error(`Cannot add '${line}' to current filter: filter not initialized.`);
+            }
+          } catch (error) {
+            this.logger.error(`Erreur lors de l'ajout de '${line}' : ${error.message}`);
+          }
+        }
       }
+
+      this.logger.debug(`Éléments restaurés depuis le fichier temp pour l'instance ${this.instanceId}`);
+    } catch (error) {
+      this.logger.error('Erreur lors de la lecture du fichier temp:', error);
+      throw error;
     }
   }
-  
+
   /**
    * Restore one or all filters from backup files.
-   * @param {keyof typeof this.filterName} filterName - The name of the filter to restore: 'current', 'previous', or 'all' for both.
-   * @param {boolean} isFirstStart - Flag indicating if this is the first start.
+   * @param {string} filterName - The name of the filter to restore: 'current', 'previous', or 'all' for both.
    * @returns {Promise<void>}
    * @throws {Error} If an error occurs while restoring the filter(s).
    */
-  async #restoreLocal(filterName = 'all', isFirstStart = false) {
+  async #restoreLocal(filterName) {
     // Validate filterName parameter
-    const validFilters = [this.filterName.current, this.filterName.previous, this.filterName.all];
+    const validFilters = ["current", "previous", "all"];
     if (!validFilters.includes(filterName)) {
       throw new Error("filterName parameter must be either 'current', 'previous', or 'all'");
     }
 
-    /** @type {(keyof typeof this.filterName)[]} */
-    const filtersToRestore =
-      filterName === this.filterName.all
-        ? [this.filterName.current, this.filterName.previous]
-        : [filterName];
+    const filtersToRestore =filterName === "all" ? ["current", "previous"] : [filterName];
 
-      if (!this.current) {
-        this.logger.warn(`No current filter instance found for id ${this.instanceId}. Creating a new one.`);
-        this.current = this.#createBloomFilter();
-      }
+    // current filter already init in constructor but is mandatory
+    // jsdoc is not able to understand that
+    if (!this.current) {
+      this.logger.warn(`No current filter instance found for id ${this.instanceId}. Creating a new one.`);
+      this.current = this.#createBloomFilter();
+    }
 
     for (const name of filtersToRestore) {
-      const filePath =
-        name === this.filterName.current
-          ? this.backupCurrentPath
-          : this.backupPreviousPath
+      const filePath = name === "current" ? this.backupCurrentPath : this.backupPreviousPath
 
-      if (!fs.existsSync(filePath)) {
-        if (isFirstStart) {
-        this.logger.warn(`No ${name} backup to restore for instance : id ${this.instanceId} (first start)`);
-        } else {
-          this.logger.error(`No ${name} backup to restore for instance : id ${this.instanceId}`);
+      if (fs.existsSync(filePath)) {
+        const buffer = await fs.promises.readFile(filePath);
+        const buckets = new Int32Array(buffer.buffer, buffer.byteOffset, buffer.length / Int32Array.BYTES_PER_ELEMENT);
+
+        try {
+          this[name] = new BloomFilter(Array.from(buckets), this.current.k);
+          this.logger.debug(`Restored ${name} filter : id ${this.instanceId}`);
+        } catch (error) {
+            this.logger.error(`Restore failed for ${name} filter: ${error.message}`);
+            this[name] = this.#createBloomFilter();
         }
-        continue;
+      } else {
+        this.logger.warn(`No ${name} backup to restore for instance : id ${this.instanceId}`);
       }
-
-      const buffer = await fs.promises.readFile(filePath);
-      const buckets = new Int32Array(
-        buffer.buffer, 
-        buffer.byteOffset, 
-        buffer.length / Int32Array.BYTES_PER_ELEMENT
-      );
-
-      try {
-        this[name] = new BloomFilter(Array.from(buckets), this.current.k);
-        this.logger.debug(`Restored ${name} filter : id ${this.instanceId}`);
-        if (!isFirstStart) {
-          this.#restoreTemp();
-          this.#backupLocal(name);
-        }
-      } catch (error) {
-          this.logger.error(`Restore failed for ${name} filter: ${error.message}`);
-          this[name] = this.#createBloomFilter();
-          if (!isFirstStart) {
-            throw error;
-          }
-      }
+    }
+    if (await this.#tempFileExistsAndNotEmpty()) {
+        await this.#restoreTemp();
     }
   }
 
+
   /**
   * Restore the current and previous filters.
-  * @param {boolean} isFirstStart - Flag indicating if this is the first start.
-  * @returns {void}
+  * @returns {Promise<void>}
   * @throws {Error} If an error occurs while restoring the filters.
   */
-  #restore(isFirstStart) {
-    this.#restoreLocal('all',isFirstStart);
+  async #restore() {
+    await this.#restoreLocal('all');
   }
-
 
   /**
    * Deletes a backup file if it exists.
-   * 
    * @param {string} filePath The path to the backup file.
    * @param {string} fileType The type of backup file (e.g., 'Current', 'Previous').
-   * throws {Error} If an error occurs while deleting the backup file.
+   * @throws {Error} If an error occurs while deleting the backup file.
    */
-  #deleteBackupFile(filePath, fileType) {
+  async #deleteBackupFile(filePath, fileType) {
     try {
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+      if (await fs.promises.stat(filePath).then(() => true).catch(() => false)) {
+        await fs.promises.unlink(filePath);
         this.logger.debug(`${fileType} backup file deleted.`);
       }
     } catch (error) {
@@ -396,7 +408,8 @@ export class BloomFilterManager {
    * Rotates the Bloom filters.
    * @throws {Error} If an error occurs while rotating the filters.
    */
-  #rotate() {
+  async #rotate() {
+    const release = await this.mutex.acquire();
     try {
       if (!this.previousDone) {
         this.previousDone = true;
@@ -407,7 +420,9 @@ export class BloomFilterManager {
     } catch (error) {
       this.logger.error('Error rotating Bloom filters:', error);
       throw error;
-    } 
+    } finally {
+      release();
+    }
   }
 
   /**
@@ -435,18 +450,34 @@ export class BloomFilterManager {
   }
   /* c8 ignore stop */
 
-  /**
-   * Adds a value to the current and next filters.
+ /**
+   * Adds a value to the current Bloom filter and synchronously appends it to the temporary backup file.
+   * 
+   * IMPORTANT: This method uses synchronous file writing (fs.appendFileSync) to ensure that no tokens are lost in case of a crash.
+   * This is a deliberate choice made after careful consideration of the following factors:
+   * 
+   * - Low data volume: Only about 50 characters are added per token.
+   * - Measured and acceptable synchronous write time: Tests have shown an average write time of 9 µs on my old sata ssd, which has a negligible impact on performance.
+   * - No concurrency (currently): There are no other concurrent operations on the temporary file or the filters.
+   * - Priority to data integrity: It is crucial to guarantee that no tokens are lost in the event of a crash.
+   * - Append-only writes: Simplifies management and reduces risks.
+   * - No queue, batching, or mutex: To avoid data loss in memory and maintain simplicity.
+   * 
+   * This approach is a trade-off between performance and data integrity. It is acceptable in this specific case, but should be reevaluated if the
+   * data volume, frequency of additions, or complexity of the application increases significantly.
+   *
    * @param {string} filterItem - The value to add.
-   * @returns {Promise<void>}
+   * @returns {void}
    * @throws {TypeError} If the value is not a string.
+   * @throws {Error} If an error occurs while writing to the temporary file.
    */
-  async add(filterItem) {
+  add(filterItem) {
     if (typeof filterItem !== 'string' || filterItem.trim() === '') {
       throw new Error('Value must be a string');
     }
     try {
-      await fs.promises.appendFile(this.backupTempFilePath, `${filterItem}\n`); // Asynchrone maintenant
+      // Synchronous append to the temporary file
+      fs.appendFileSync(this.backupTempFilePath, `${filterItem}\n`);
       this.current?.add(filterItem);
     } catch (error) {
       this.logger.error('Error adding value to Bloom filter:', error);
@@ -474,35 +505,34 @@ export class BloomFilterManager {
 
   /**
    * Resets the Bloom filters.
+   * @returns {Promise<void>}
    * @throws {Error} If an error occurs while resetting the filters.
    */
-  reset() {
+  async reset() {
+    const release = await this.mutex.acquire();
     try {
-      this.#stopRotation(); // Stop the Itervals
-      this.#stopBackup();
-
       this.previous = null;
       this.current = this.#createBloomFilter();
       this.previousDone = false;
       this.logger.debug('Bloom filters reset.');
-
-      this.rotationInterval = setInterval(() => this.#rotate(), this.rotateTime);
-      this.backupInterval = setInterval(() => this.#backup(), 5 * 60 * 1000);
+      this.#init();
     } catch (error) {
       this.logger.error('Error resetting Bloom filters:', error);
       throw error;
-    } 
-  } 
+    } finally {
+      release();
+    }
+  }
 
   /**
    * Resets the Bloom filters and deletes the backup files.
-   * 
+   *
    */
-  resetAndClearData() {
+  async resetAndClearData() {
     this.reset();
-    this.#deleteBackupFile(this.backupCurrentPath, 'Current');
-    this.#deleteBackupFile(this.backupPreviousPath, 'Previous');
-    this.#deleteBackupFile(this.backupTempFilePath, 'Temporary');
+    await this.#deleteBackupFile(this.backupCurrentPath, 'Current');
+    await this.#deleteBackupFile(this.backupPreviousPath, 'Previous');
+    await this.#deleteBackupFile(this.backupTempFilePath, 'Temporary');
   }
 
 
@@ -520,5 +550,3 @@ export class BloomFilterManager {
     this.logger.debug('BloomFilterManager destroyed.');
   }
 }
-
-
