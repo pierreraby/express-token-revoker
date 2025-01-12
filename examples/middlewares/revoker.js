@@ -6,7 +6,8 @@ import logger from '../logger.js';
 const JWTconfig = { // this config uses ~21MB of memory
   numItems: 1000000, // 1 million items
   fpRate: 0.000001, // one in a million
-  rotateTime: 1800000, // 30 minutes
+  //rotateTime: 1800000, // 30 minutes
+  rotateTime: 30 * 1000, // 30 seconds
   claimsToCheck: ["jti", "fam", "sub"], // adding claims to check, return a JWT check middleware
   logger
 };
