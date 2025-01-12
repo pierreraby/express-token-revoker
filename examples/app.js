@@ -23,11 +23,11 @@ app.get('/protected', auth, JWTfilter, (req, res) => {
 });
 
 // admin route for revoking JWT tokens
-app.post('/revoke/:claim/:value', admin, JWTfilter, (req, res) => {
+app.post('/revoke/:claim/:value', admin, JWTfilter, async (req, res) => {
   try {
     const { claim, value } = req.params;
     const filterItem = `${claim}-${value}`;
-    JWTrevoker.add(filterItem);
+    await JWTrevoker.add(filterItem);
     res.status(200).json({ message: 'Token revoked' });
   } catch(error) {
     res.status(500).json({ message: `Error: ${ error }` });
@@ -40,10 +40,10 @@ app.get('/protected2', opaqueFilter, (req, res) => {
 });
 
 // admin route for revoking opaque tokens with default header (Authorization)
-app.post('/revoke2/:token', admin, JWTfilter, (req, res) => {
+app.post('/revoke2/:token', admin, JWTfilter, async (req, res) => {
   const { token } = req.params;
   try {
-    opaqueRevoker.add(token);
+    await opaqueRevoker.add(token);
     res.status(200).json({ message: 'Token revoked' });
   } catch(error) {
     res.status(500).json({ message: `Error: ${ error }` });
@@ -61,6 +61,30 @@ app.post('/revoke3/:token', admin, JWTfilter, (req, res) => {
   try {
     opaqueRevokerCustom.add(token);
     res.status(200).json({ message: 'Token revoked' });
+  } catch(error) {
+    res.status(500).json({ message: `Error: ${ error }` });
+  }
+});
+
+// admin restore the Bloom filter
+app.post('/restore', admin, (req, res) => {
+  try {
+    JWTrevoker.restore();
+    opaqueRevoker.restore();
+    opaqueRevokerCustom.restore();
+    res.status(200).json({ message: 'Bloom filters restored' });
+  } catch(error) {
+    res.status(500).json({ message: `Error: ${ error }` });
+  }
+});
+
+// admin reset the Bloom filter
+app.post('/reset', admin, (req, res) => {
+  try {
+    JWTrevoker.reset();
+    opaqueRevoker.reset();
+    opaqueRevokerCustom.reset();
+    res.status(200).json({ message: 'Bloom filters reset' });
   } catch(error) {
     res.status(500).json({ message: `Error: ${ error }` });
   }

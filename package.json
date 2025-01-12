@@ -8,9 +8,9 @@
   "license": "ISC",
   "type": "module",
   "scripts": {
-    "start": "node --env-file=.env ./example/app.js",
-    "dev": "nodemon --env-file=.env ./example/app.js",
-    "client": "node --env-file=.env ./example/client.js",
+    "start": "node --env-file=.env ./examples/app.js",
+    "dev": "nodemon --env-file=.env ./examples/app.js",
+    "client": "node --env-file=.env ./examples/client.js",
     "test": "c8 node bin/test.js"
   },
   "dependencies": {

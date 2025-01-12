@@ -1,5 +1,16 @@
 // @ts-check
 
+//@property {import('pino').Logger} logger - Logger instance. 
+
+/**
+ * @typedef {Object} GenericLogger
+ * @property {function(...any): void} error - Log an error message
+ * @property {function(...any): void} warn - Log a warning message
+ * @property {function(...any): void} info - Log an info message
+ * @property {function(...any): void} debug - Log a debug message
+ * @property {function(...any): void} trace - Log a trace message
+ */
+
 /**
  * @typedef {Object} JWTToken
  * @property {string} [iss] - Issuer claim.
@@ -26,55 +37,112 @@ const revokedJwtReplay = new client.Counter({
 });
 
 /**
+   * Logs or throttles messages based on the environment.
+   * @param {string} message - The message to log or throttle.
+   * @param {boolean} [isError=false] - Whether the message is an error.
+   * @param {Function} throttleFn - Throttle function.
+   * @param {GenericLogger} logger - Any logger implementing the basic logging methods
+   */
+const logOrThrottle = (message, throttleFn, logger, isError = false) => {
+  if (process.env.NODE_ENV !== 'development') {
+    throttleFn(message);
+  } else {
+    logger[isError ? 'warn' : 'info'](message);
+  }
+};
+
+/**
  * Middleware factory to check claims with the Bloom filter.
  * @param {string[]} claimsToCheck - List of claims to check.
  * @param {BloomFilterManager} bloomFilterManager - Instance of the Bloom filter manager.
- * @param {import('pino').Logger} logger - Logger instance.
+ * @param {GenericLogger} logger - Any logger implementing the basic logging methods
+ * @param {GenericLogger} logger - Any logger implementing the basic logging methods
  * @param {Function} throttleJWT - Throttle function.
  * @returns {import('express').RequestHandler} Middleware Express.
-*/
-const createJWTMiddleware = (claimsToCheck , bloomFilterManager, logger, throttleJWT) => {
-   /**
+ */
+const createJWTMiddleware = (claimsToCheck, bloomFilterManager, logger, throttleJWT) => {
+
+  // /**
+  //  * Logs or throttles messages based on the environment.
+  //  * @param {string} message - The message to log or throttle.
+  //  * @param {boolean} [isError=false] - Whether the message is an error.
+  //  */
+  // const logOrThrottle = (message, isError = false) => {
+  //   if (process.env.NODE_ENV !== 'development') {
+  //     throttleJWT(message);
+  //   } else {
+  //     logger[isError ? 'warn' : 'info'](message);
+  //   }
+  // };
+
+  /**
+   * Validates the presence of the token.
+   * @param {JWTToken | undefined} token - The JWT token to validate.
+   * @returns {token is JWTToken} - True if token is valid, throws otherwise
+   * @throws {Error} If the token is missing.
+   */
+  const validateToken = (token) => {
+    if (!token) {
+      logger.info("Missing jwt token");
+      return false;
+    }
+    return true;
+  };
+
+  /**
+   * Validates a specific claim in the JWT token.
+   * @param {JWTToken} token - The JWT token to validate.
+   * @param {string} claim - The claim to validate.
+   * @throws {Error} If the claim is missing or blacklisted.
+   */
+  const validateClaim = (token, claim) => {
+    if (!token[claim]) {
+      logger.info(`Missing ${claim} claim in JWT token`);
+      return false;
+    }
+
+    if (bloomFilterManager.has(`${claim}-${token[claim]}`)) {
+      revokedJwtReplay.inc();
+      logOrThrottle(`Token ${claim}-${token[claim]} is blacklisted`, throttleJWT, logger, false);
+      return false;
+    }
+    return true;
+  };
+
+  /**
+   * Validates all specified claims in the JWT token.
+   * @param {JWTToken} token - The JWT token to validate.
+   * @param {string[]} claims - The claims to validate.
+   */
+  const validateAllClaims = (token, claims) => {
+    return claims.every(claim => validateClaim(token, claim));
+  };
+
+  /**
    * Express middleware to validate JWT tokens against a Bloom filter.
    * @param {import('express').Request} req - Express request object.
    * @param {import('express').Response} res - Express response object.
    * @param {import('express').NextFunction} next - Express next middleware function.
    */
   return (req, res, next) => {
-
+    try {
       /** @type {RequestWithToken} */
       const reqWithToken = req;
 
-
-    try {
-      if (!reqWithToken.token) {
-        logger.error("Missing jwt token");
-        throw new Error("Missing jwt token");
+      if (validateToken(reqWithToken.token) && validateAllClaims(reqWithToken.token, claimsToCheck)) {
+        next();
+      } else {
+        res.status(401).json({
+          error: "invalid_token",
+          message: `Invalid token!`,
+        });
       }
-
-      for (const claim of claimsToCheck) {
-        if (!reqWithToken.token[claim]) {
-          logger.warn(`Missing ${claim} claim in JWT token`);
-          throw new Error(`Missing ${claim} claim in JWT token`);
-        }
-
-        if (bloomFilterManager.has(`${claim}-${reqWithToken.token[claim]}`)) {
-          revokedJwtReplay.inc();
-          if (process.env.NODE_ENV !== 'development') {
-            throttleJWT(`Token ${claim} is blacklisted`);
-          } else {
-            logger.info(`Token ${claim} is blacklisted`);
-          }
-          throw new Error(`Token ${claim} is blacklisted`);
-        }
-      }
-      next();
     } catch (error) {
-      logger.info(`Invalid token: ${error.message}`);
-      res.status(401).json({
-        error: "invalid_token",
-        message: `Invalid token! ${error.message}`,
-        details: error.details || null,
+      // Handle unexpected errors (e.g., an error in the bloomFilterManager)
+      logger.error(`Unexpected error during JWT validation: ${error.message}`);
+      res.status(500).json({
+        error: "internal_error",
+        message: "An unexpected error occurred",
       });
     }
   };
@@ -85,17 +153,80 @@ const revokedOpaqueReplay = new client.Counter({
   help: 'Number of revoked opaque tokens',
 });
 
+// @param {Function} throttleOpaque - Throttle function.
+
 /**
  * Middleware factory to check opaque token with the Bloom filter.
  * @param {string} header - The header to check.
  * @param {BloomFilterManager} bloomFilterManager - Instance of the Bloom filter manager.
- * @param {import('pino').Logger} logger - Logger instance.
+ * @param {GenericLogger} logger - Any logger implementing the basic logging methods
  * @param {Function} throttleOpaque - Throttle function.
  * @returns {import('express').RequestHandler} Middleware Express.
  */
- const createOpaqueMiddleware = (header, bloomFilterManager, logger, throttleOpaque) => {
+const createOpaqueMiddleware = (header, bloomFilterManager, logger, throttleOpaque) => {
+
+  // /**
+  //  * Logs or throttles messages based on the environment.
+  //  * @param {string} message - The message to log or throttle.
+  //  * @param {boolean} [isError=false] - Whether the message is an error.
+  //  */
+  // const logOrThrottle = (message, isError = false) => {
+  //   if (process.env.NODE_ENV !== 'development') {
+  //     throttleOpaque(message);
+  //   } else {
+  //     logger[isError ? 'warn' : 'info'](message);
+  //   }
+  // };
+
+    /**
+   * Extracts the token from the request headers.
+   * @param {import('express').Request} req - Express request object.
+   * @param {string} normalizedHeader - The normalized header name.
+   * @returns {string} The extracted token.
+   * @throws {Error} If the header is missing or invalid.
+   */
+  const extractToken = (req, normalizedHeader) => {
+    const headerValue = req.headers[normalizedHeader];
+    
+    if (!headerValue) {
+      logger.info(`Missing header: ${normalizedHeader}`);
+      return '';
+    }
+
+    if (normalizedHeader === "authorization") {
+      // Ensure headerValue is a string
+      const authHeader = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+      const [type, token] = authHeader.split(" ");
+      
+      if (!token || type.toLowerCase() !== "bearer") {
+        logger.info('Invalid authorization header');
+        return '';
+      }
+      return token;
+    }
+
+    // For other headers, take the first value if it's an array
+    return Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  };
+
   /**
-   * Express middleware to validate JWT tokens against a Bloom filter.
+   * Validates the token against the Bloom filter.
+   * @param {string} token - The token to validate.
+   * @param {BloomFilterManager} bloomFilterManager - Instance of the Bloom filter manager.
+   * @throws {Error} If the token is blacklisted.
+   */
+  const validateToken = (token, bloomFilterManager) => {
+    if (token && bloomFilterManager.has(token)) {
+      revokedOpaqueReplay.inc();
+      logOrThrottle(`Token ${token} is blacklisted`, throttleOpaque, logger, false);
+      logger.info(`Token ${token} is blacklisted`);
+      return false;
+    }
+    return true;
+  };
+  
+    /**
+   * Express middleware to validate Opaques tokens/ API KEYS against a Bloom filter.
    * @param {import('express').Request} req - Express request object.
    * @param {import('express').Response} res - Express response object.
    * @param {import('express').NextFunction} next - Express next middleware function.
@@ -103,49 +234,22 @@ const revokedOpaqueReplay = new client.Counter({
   return (req, res, next) => {
     try {
       const normalizedHeader = header.toLowerCase();
-      if (!req.headers || !req.headers[normalizedHeader]) {
-        if (process.env.NODE_ENV !== 'development') {
-          throttleOpaque(`Missing header: ${header}`);
-        } else {
-          logger.warn(`Missing header: ${header}`);
-        }
-        throw new Error(`Missing header: ${header}`);
-      }
-      
-      let token;
-      if (normalizedHeader === "authorization") {
-        // @ts-ignore
-        const parts = req.headers.authorization.split(" ");
-        if (parts.length !== 2 || parts[0].toLowerCase() !== "bearer") {
-          if (process.env.NODE_ENV !== 'development') {
-            throttleOpaque('Invalid authorization header');
-          } else {
-            logger.warn('Invalid authorization header');
-          }
-          throw new Error('Invalid authorization header');
-        }
-        token = parts[1];
+      const token = extractToken(req, normalizedHeader);
+      if (token !== '' && validateToken(token, bloomFilterManager)) {
+        next();
       } else {
-        token = req.headers[normalizedHeader];
+        res.status(401).json({
+          error: "invalid_token",
+          message: `Invalid token!`,
+        });
       }
-      if (typeof token === 'string' && bloomFilterManager.has(token)) {
-        revokedOpaqueReplay.inc();
-        if (process.env.NODE_ENV !== 'development') {
-          throttleOpaque(`Token ${token} is blacklisted`);
-        } else {
-          logger.info(`Token ${token} is blacklisted`);
-        }
-        throw new Error(`Token is blacklisted`);
-      }
-      next();
     } catch (error) {
-      logger.info(`Invalid opaque token: ${error.message}`);
-      res.status(401).json({
-        error: "invalid_token",
-        message: `Invalid token! ${error.message}`,
-        details: error.details || null,
+      // Gérer les erreurs inattendues (par exemple, une erreur dans le bloomFilterManager)
+      logger.error(`Unexpected error during JWT validation: ${error.message}`);
+      res.status(500).json({
+        error: "internal_error",
+        message: "An unexpected error occurred",
       });
-      throw error;
     }
   };
 };
@@ -176,8 +280,7 @@ export class Revoker {
    * @property {number} numItems - Number of items to store in the Bloom filter.
    * @property {number} fpRate - Target false positive rate for the Bloom filter.
    * @property {number} rotateTime - Rotation interval in milliseconds.
-   * @property {import('pino').Logger} logger - Logger instance. 
-   *
+   * @property {GenericLogger} logger - Any logger implementing the basic logging methods
    * @typedef {ConfigBase & { claimsToCheck: Array<string>, opaqueHeader?: never }} JWTConfig
    * @typedef {ConfigBase & { opaqueHeader: string, claimsToCheck?: never }} OpaqueConfig
    * @typedef {JWTConfig | OpaqueConfig} Config
@@ -189,6 +292,8 @@ export class Revoker {
    */
   constructor(config) {
     const { numItems, fpRate, rotateTime, claimsToCheck, opaqueHeader, logger } = config;
+    // this.logger = logger;
+
     this.bloomFilterManager = new BloomFilterManager({
       numItems,
       fpRate,
@@ -224,18 +329,51 @@ export class Revoker {
    * Adds an item to the Bloom filter.
    * @param {string} filterItem - The item to add.
    */
-  add(filterItem) {
+  async add(filterItem) {
     if (this.bloomFilterManager) {
-      this.bloomFilterManager.add(filterItem);
+      try {
+        await this.bloomFilterManager.add(filterItem);
+      } catch (error) {
+        throw error; // On propage l'erreur originale, pas juste le message
+      }
+    }
+  }
+
+
+  /**
+   * Resets the Bloom filter.
+   */
+  reset() {
+    if (this.bloomFilterManager) {
+      this.bloomFilterManager.reset();
     }
   }
 
   /**
+   * Resets the Bloom filter anc clears data.
+   */
+  async resetAndClearData() {
+    if (this.bloomFilterManager) {
+      this.bloomFilterManager.resetAndClearData();
+    }
+  }
+
+  // /**
+  //  * Restores the Bloom filter from a backup file.
+  //  */
+  // restore() {
+  //   if (this.bloomFilterManager) {
+  //     this.bloomFilterManager.restore();
+  //   }
+  // }
+
+  /**
    * Destroys the Bloom filter manager.
    */
-  destroy() {
+  async destroy() {
     if (this.bloomFilterManager) {
-      this.bloomFilterManager.destroy();
+      await this.bloomFilterManager.destroy();
+      this.middleware = null;
       this.bloomFilterManager = null;
     }
   }
