@@ -151,9 +151,6 @@ export class BloomFilterManager {
 
     this.current = this.#createBloomFilter();
 
-    this.rotationInterval = setInterval(() => this.#rotate(), this.rotateTime);
-    this.backupInterval = setInterval(() => this.#backup(), 2 * 60 * 1000); // Backup every 5 minutes
-
     this.backupDir = path.join(__dirname, '../backup');
     this.backupCurrentPath = path.join(this.backupDir, `current-${this.instanceId}.blob`);
     this.backupPreviousPath = path.join(this.backupDir, `previous-${this.instanceId}.blob`);
@@ -433,7 +430,7 @@ export class BloomFilterManager {
     if (this.rotationInterval !== null) {
       clearInterval(this.rotationInterval);
       this.rotationInterval = null;
-      this.logger.debug('Bloom filter rotation stopped.');
+      this.logger.debug('Bloom filter rotation stopped. Interval is now:', this.rotationInterval);
     }
   }
 
@@ -539,12 +536,11 @@ export class BloomFilterManager {
 
   /**
    * Cleans up resources when the instance is destroyed.
-   * @returns {Promise<void>}
+   * @returns {void}
    */
-  async destroy() {
+  destroy() {
     this.#stopRotation();
     this.#stopBackup();
-    await new Promise((resolve) => setTimeout(resolve, 10)); // 5 ms, à ajuster si besoin
     this.previous = null;
     this.current = null;
     this.logger.debug('BloomFilterManager destroyed.');
