@@ -1,7 +1,5 @@
 // @ts-check
 
-//@property {import('pino').Logger} logger - Logger instance. 
-
 /**
  * @typedef {Object} GenericLogger
  * @property {function(...any): void} error - Log an error message
@@ -61,19 +59,6 @@ const logOrThrottle = (message, throttleFn, logger, isError = false) => {
  * @returns {import('express').RequestHandler} Middleware Express.
  */
 const createJWTMiddleware = (claimsToCheck, bloomFilterManager, logger, throttleJWT) => {
-
-  // /**
-  //  * Logs or throttles messages based on the environment.
-  //  * @param {string} message - The message to log or throttle.
-  //  * @param {boolean} [isError=false] - Whether the message is an error.
-  //  */
-  // const logOrThrottle = (message, isError = false) => {
-  //   if (process.env.NODE_ENV !== 'development') {
-  //     throttleJWT(message);
-  //   } else {
-  //     logger[isError ? 'warn' : 'info'](message);
-  //   }
-  // };
 
   /**
    * Validates the presence of the token.
@@ -164,19 +149,6 @@ const revokedOpaqueReplay = new client.Counter({
  * @returns {import('express').RequestHandler} Middleware Express.
  */
 const createOpaqueMiddleware = (header, bloomFilterManager, logger, throttleOpaque) => {
-
-  // /**
-  //  * Logs or throttles messages based on the environment.
-  //  * @param {string} message - The message to log or throttle.
-  //  * @param {boolean} [isError=false] - Whether the message is an error.
-  //  */
-  // const logOrThrottle = (message, isError = false) => {
-  //   if (process.env.NODE_ENV !== 'development') {
-  //     throttleOpaque(message);
-  //   } else {
-  //     logger[isError ? 'warn' : 'info'](message);
-  //   }
-  // };
 
     /**
    * Extracts the token from the request headers.
@@ -280,6 +252,7 @@ export class Revoker {
    * @property {number} numItems - Number of items to store in the Bloom filter.
    * @property {number} fpRate - Target false positive rate for the Bloom filter.
    * @property {number} rotateTime - Rotation interval in milliseconds.
+   * @property {number} [backupInterval] - Backup interval in milliseconds.
    * @property {GenericLogger} logger - Any logger implementing the basic logging methods
    * @typedef {ConfigBase & { claimsToCheck: Array<string>, opaqueHeader?: never }} JWTConfig
    * @typedef {ConfigBase & { opaqueHeader: string, claimsToCheck?: never }} OpaqueConfig
@@ -291,13 +264,13 @@ export class Revoker {
    * @throws {Error} If neither `claimsToCheck` nor `opaqueHeader` is provided.
    */
   constructor(config) {
-    const { numItems, fpRate, rotateTime, claimsToCheck, opaqueHeader, logger } = config;
-    // this.logger = logger;
+    const { numItems, fpRate, rotateTime, claimsToCheck, opaqueHeader, backupInterval, logger = console } = config;
 
     this.bloomFilterManager = new BloomFilterManager({
       numItems,
       fpRate,
       rotateTime, // 30 minutes
+      backupPeriod : backupInterval,
       logger
     });
 
@@ -341,11 +314,11 @@ export class Revoker {
 
 
   /**
-   * Resets the Bloom filter.
+   * Resets and restore the Bloom filter.
    */
   reset() {
     if (this.bloomFilterManager) {
-      this.bloomFilterManager.reset();
+      this.bloomFilterManager.resetAndRestore();
     }
   }
 

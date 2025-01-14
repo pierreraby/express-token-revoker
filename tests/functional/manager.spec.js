@@ -16,8 +16,9 @@ test.group('BloomFilterManager Functional Tests', (group) => {
     manager = new BloomFilterManager({
       numItems: 1000,
       fpRate: 0.0001,
-      rotateTime: 1000, // 5 second for testing
-      logger: console
+      rotateTime: 5000, // 5 second for testing
+      logger: console,
+      backupPeriod: 3000
     })
   })
 
@@ -54,12 +55,29 @@ test.group('BloomFilterManager Functional Tests', (group) => {
     expect(manager.has('nonExistent')).toBe(false)
   })
 
-  test('reset method clears the Bloom filters', async ({expect}) => {
+  test('reset method clears the Bloom filters and restore', async ({expect}) => {
     manager.add('testValue')
-    await manager.reset()
+    await manager.resetAndRestore()
+    expect(manager.has('testValue')).toBe(true)
+  })
+
+  test('reset method clears the Bloom filters and clear data', async ({expect}) => {
+    manager.add('testValue')
+    await manager.resetAndClearData();
     expect(manager.has('testValue')).toBe(false)
   })
 
+  test('destroy method properly cleans up the manager', async ({ expect }) => {
+    const clearIntervalSpy = sinon.spy(global, 'clearInterval')
+    manager.destroy()
+    expect(manager.previous).toBeNull()
+    expect(manager.current).toBeNull()
+    expect(manager.rotationInterval).toBeNull()
+    expect(manager.backupInterval).toBeNull()
+    expect(clearIntervalSpy.called).toBe(true)
+    expect(clearIntervalSpy.calledTwice).toBe(true)
+    clearIntervalSpy.restore()
+  })
 
 
 
@@ -164,24 +182,7 @@ test.group('BloomFilterManager Functional Tests', (group) => {
 })
 
  test.group('test', (group) => {
-  test('destroy method properly cleans up the manager', async ({ expect }) => {
-    const manager = new BloomFilterManager({
-      numItems: 1000,
-      fpRate: 0.0001,
-      rotateTime: 5000, // 5 second for testing
-      logger: console
-    })
-    await new Promise((resolve) => setTimeout(resolve, 1000)) // wait for rotation interval to start
-    const clearIntervalSpy = sinon.spy(global, 'clearInterval')
-    manager.destroy()
-    expect(manager.previous).toBeNull()
-    expect(manager.current).toBeNull()
-    expect(manager.rotationInterval).toBeNull()
-    expect(manager.backupInterval).toBeNull()
-    expect(clearIntervalSpy.called).toBe(true)
-    expect(clearIntervalSpy.calledTwice).toBe(true)
-    clearIntervalSpy.restore()
-  })
+
 })
 
 // test.group('BloomFilterManager _ensureBackupDirExists', (group) => {
