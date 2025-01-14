@@ -37,7 +37,8 @@ test.group('Middleware Tests', (group) => {
       fpRate: 0.01,
       rotateTime: 1000,
       claimsToCheck: ['claim1'],
-      logger
+      logger,
+      backupInterval: 5 * 60000 // 5 minutes
     })
 
     const middleware = revoker.getMiddleware()
@@ -87,21 +88,25 @@ test.group('Middleware Tests', (group) => {
       fpRate: 0.01,
       rotateTime: 1000,
       claimsToCheck: ['claim1', 'claim2'],
-      logger
+      logger,
+      backupInterval: 5 * 60000 // 5 minutes
     })
     
     const middleware = revoker.getMiddleware()
     middleware(req, res, next)
 
+    expect(logger.info.called).toBe(true)
+    expect(logger.info.calledWith('Missing jwt token'))
     expect(next.called).toBe(false)
     expect(res.status.calledWith(401)).toBe(true)
     expect(res.json.calledOnce).toBe(true)
     expect(res.json.firstCall.args[0]).toMatchObject({
       error: 'invalid_token',
-      message: expect.stringContaining('Missing jwt token')
+      message: expect.stringContaining('Invalid token!')
     })
-    revoker.resetAndClearData();
+    await revoker.resetAndClearData();
     await revoker.destroy()
+
   })
 
   test('JWT Middleware - missing required claim', async ({ expect }) => {
@@ -110,7 +115,8 @@ test.group('Middleware Tests', (group) => {
       fpRate: 0.001,
       rotateTime: 1000,
       claimsToCheck: ['claim1', 'claim2'],
-      logger
+      logger,
+      backupInterval: 5 * 60000 // 5 minutes
     })
     
     const middleware = revoker.getMiddleware()
@@ -120,18 +126,18 @@ test.group('Middleware Tests', (group) => {
       }
     }
     
-
     middleware(req, res, next)
 
+    expect(logger.info.called).toBe(true)
+    expect(logger.info.calledWith('Missing claim2 in jwt token'))
     expect(next.called).toBe(false)
     expect(res.status.calledWith(401)).toBe(true)
     expect(res.json.calledOnce).toBe(true)
-    console.log(res.json.firstCall.args[0])
     expect(res.json.firstCall.args[0]).toMatchObject({
       error: 'invalid_token',
-      message: expect.stringContaining('Missing claim2 claim in JWT token')
+      message: expect.stringContaining('Invalid token!')
     })
-    revoker.resetAndClearData();
+    await revoker.resetAndClearData();
     await revoker.destroy()
   })
 
