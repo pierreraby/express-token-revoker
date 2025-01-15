@@ -12,6 +12,7 @@ import { Mutex } from 'async-mutex';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename)
 
+ // * @property {'import("./index.js").GenericLogger'} logger - Any logger implementing the basic logging methods
 /**
  * @typedef {Object} GenericLogger
  * @property {function(...any): void} error - Log an error message
@@ -26,9 +27,10 @@ const __dirname = dirname(__filename)
  * @property {number} numItems - Number of items to store in the filter.
  * @property {number} fpRate - Target false positive rate.
  * @property {number} rotateTime - Filter rotation interval in milliseconds.
- * @property {number} [backupPeriod] - Filter backup interval in milliseconds.
+ * @property {boolean} [backup] - whether to enable backup.
+ * @property {number} [backupTime] - Backup interval in milliseconds.
  * @property {GenericLogger} logger - Any logger implementing the basic logging methods
- * @property {'import("./index.js").GenericLogger'} logger - Any logger implementing the basic logging methods
+
  */
 export class BloomFilterManager {
 
@@ -52,15 +54,27 @@ export class BloomFilterManager {
 
   /**
    * @private
+   * @type {number}
+   */
+  rotateTime;
+
+  /**
+   * @private
    * @type {NodeJS.Timeout | null}
    */
   backupInterval = null;
 
   /**
    * @private
-   * @type {number | null}
+   * @type {boolean}
    */
-  backupPeriod;
+  backupEnabled;
+
+  /**
+   * @private
+   * @type {number | undefined}
+   */
+  backupTime;
 
   /**
    * @private
@@ -122,7 +136,7 @@ export class BloomFilterManager {
    */
   constructor(options) {
 
-    const { numItems, fpRate, rotateTime, backupPeriod, logger } = options;
+    const { numItems, fpRate, rotateTime, backup, backupTime, logger } = options;
 
     if (!numItems || !Number.isInteger(numItems)  || numItems <= 0) {
       logger.error('numItems must be a positive integer.');
@@ -136,10 +150,29 @@ export class BloomFilterManager {
       logger.error('rotateTime must be a positive integer.');
       throw new Error('rotateTime must be a positive integer.');
     }
-    if (backupPeriod && (!Number.isInteger(backupPeriod) || backupPeriod <= 0)) {
-      logger.error('backupInterval must be a positive integer.');
-      throw new Error('backupInterval must be a positive integer.');
+
+    if (backup && typeof backup !== 'boolean') {
+      logger.error('backup must be a boolean.');
+      throw new Error('backup must be a boolean.');
     }
+    if (backup && backupTime) {
+      if (!Number.isInteger(backupTime) || backupTime <= 0) {
+        logger.error('backupTime must be a positive integer.');
+        throw new Error('backupTime must be a positive integer.');
+      }
+      if (backupTime>= rotateTime) {
+        logger.error('backupTime must be less than rotateTime.');
+        throw new Error('backupTime must be less than rotateTime.');
+      }
+    }
+
+    if (!logger || typeof logger !== 'object') {
+      throw new Error('logger must be an object.');
+    }
+    if (!logger.error || !logger.warn || !logger.info || !logger.debug) {
+      throw new Error('logger must have methods info, warn, debug, and error.');
+    }
+
 
     this.instanceId = BloomFilterManager.count++;
 
@@ -150,7 +183,9 @@ export class BloomFilterManager {
     /** @private */
     this.rotateTime = rotateTime;
     /** @private */
-    this.backupPeriod = backupPeriod ?? null;
+    this.backupEnabled = backup || false;
+    /** @private */
+    this.backupTime = backupTime;
     /** @private */
     this.logger = logger;
     /** @private */
@@ -181,8 +216,8 @@ export class BloomFilterManager {
   */
   #init() {
     this.#ensureBackupDirExists();
-    const isFirstStart = this.#isFirstStart();
-    if (!isFirstStart) {
+
+    if (this.backupEnabled && this.#backupExists()) {
       this.#restore();
     }
     this.#startRotationAndBackupIntervals();
@@ -194,21 +229,22 @@ export class BloomFilterManager {
    */
   #startRotationAndBackupIntervals() {
     this.rotationInterval = setInterval(() => this.#rotate(), this.rotateTime);
-    if (this.backupPeriod) {
-      this.backupInterval = setInterval(() => this.#backup(), this.backupPeriod);
+
+    if (this.backupEnabled && this.backupTime && this.backupTime < this.rotateTime) {
+      this.backupInterval = setInterval(() => this.#backup(), this.backupTime);
     }
   }
 
   /**
-   * Checks if this is the first start of the application (no back up files).
+   * Checks if backup files exist.
    */
-  #isFirstStart() {
+  #backupExists() {
     try {
         const files = fs.readdirSync(this.backupDir);
-        return files.length === 0; // If the directory is empty, it's the first start
+        return files.length !== 0;// Check if the backup directory is not empty
           } catch (error) {
-        this.logger.error('Error checking if first start:', error);
-        return false; // In case of an error, assume it's not the first start
+        this.logger.error('Error checking if backup exist:', error);
+        return false; // In case of an error, we consider that the backup does not exist
     }
   }
 
@@ -278,7 +314,7 @@ export class BloomFilterManager {
 
         // Skip previous filter backup if not needed before first rotation
         if (name === "previous" && !filter && !this.previousDone) {
-          this.logger.debug('No previous filter to backup.');
+          this.logger.debug('No previous filter to backup before first rotation');
           continue;
         }
 
@@ -339,7 +375,7 @@ export class BloomFilterManager {
       }
     }
 
-    this.logger.debug(`Elements restored from temp file for instance ${this.instanceId}`);
+    this.logger.debug(`Elements restored from temp file for instance : id ${this.instanceId}`);
     } catch (error) {
     this.logger.error('Error reading temp file:', error);
     throw error;
@@ -398,6 +434,7 @@ export class BloomFilterManager {
   * @throws {Error} If an error occurs while restoring the filters.
   */
   #restore() {
+    // in future, we should restore remotly
     this.#restoreLocal('all');
   }
 
@@ -429,7 +466,7 @@ export class BloomFilterManager {
         this.previousDone = true;
       }
       this.logger.debug('Rotating Bloom filters...');
-      if (this.backupPeriod) {
+      if (this.backupEnabled) {
         this.#backupLocal('current');
         if (fs.existsSync(this.backupCurrentPath)) {
           fs.renameSync(this.backupCurrentPath , this.backupPreviousPath);
@@ -453,7 +490,7 @@ export class BloomFilterManager {
     if (this.rotationInterval !== null) {
       clearInterval(this.rotationInterval);
       this.rotationInterval = null;
-      this.logger.debug('Bloom filter rotation stopped. Interval is now:', this.rotationInterval);
+      this.logger.debug(`Bloom filter rotation stopped. Interval is now: ${this.rotationInterval}`);
     }
   }
 
@@ -465,7 +502,7 @@ export class BloomFilterManager {
     if (this.backupInterval !== null) {
       clearInterval(this.backupInterval);
       this.backupInterval = null;
-      this.logger.debug('Bloom filter backup stopped.');
+      this.logger.debug(`Bloom filter backup stopped. Interval is now: ${this.rotationInterval}`);
     }
   }
   /* c8 ignore stop */
@@ -533,10 +570,9 @@ export class BloomFilterManager {
     try {
       this.previous = null;
       this.current = this.#createBloomFilter();
-      this.previousDone = false;
       this.#stopRotation();
       this.#stopBackup();
-      this.logger.debug('Bloom filters reset.');
+      this.logger.debug('Bloom filters reset');
       this.#init();
     } catch (error) {
       this.logger.error('Error resetting Bloom filters:', error);
@@ -554,6 +590,7 @@ export class BloomFilterManager {
     await this.#deleteBackupFile(this.backupCurrentPath, 'Current');
     await this.#deleteBackupFile(this.backupPreviousPath, 'Previous');
     await this.#deleteBackupFile(this.backupTempFilePath, 'Temporary');
+    this.previousDone = false;
     await this.resetAndRestore();
   }
 
