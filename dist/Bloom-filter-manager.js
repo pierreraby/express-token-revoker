@@ -530,7 +530,7 @@ export class BloomFilterManager {
    */
   add(filterItem) {
     if (typeof filterItem !== 'string' || filterItem.trim() === '') {
-      throw new Error('Value must be a string');
+      throw new Error('Value must be a non-empty string');
     }
     try {
       // Synchronous append to the temporary file
@@ -549,11 +549,15 @@ export class BloomFilterManager {
    * @throws {TypeError} If the value is not a string.
    */
   has(value) {
+    if (typeof value !== 'string' || value.trim() === '') {
+      throw new Error('Value must be a non-empty string');
+    }
+    
     try {
-        return (
-          (this.current ? this.current.test(value) : false) ||
-          (this.previous ? this.previous.test(value) : false)
-        );
+      return (
+        (this.current ? this.current.test(value) : false) ||
+        (this.previous ? this.previous.test(value) : false)
+      );
     } catch (error) {
       this.logger.warn('Error in has:', error);
       return false;
