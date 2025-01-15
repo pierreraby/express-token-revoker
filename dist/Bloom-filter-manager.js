@@ -408,10 +408,10 @@ export class BloomFilterManager {
       const filePath = name === "current" ? this.backupCurrentPath : this.backupPreviousPath
 
       if (fs.existsSync(filePath)) {
-        const buffer = fs.readFileSync(filePath);
-        const buckets = new Int32Array(buffer.buffer, buffer.byteOffset, buffer.length / Int32Array.BYTES_PER_ELEMENT);
-
+        
         try {
+          const buffer = fs.readFileSync(filePath);
+          const buckets = new Int32Array(buffer.buffer, buffer.byteOffset, buffer.length / Int32Array.BYTES_PER_ELEMENT);
           this[name] = new BloomFilter(Array.from(buckets), this.current.k);
           this.logger.debug(`Restored ${name} filter : id ${this.instanceId}`);
         } catch (error) {
