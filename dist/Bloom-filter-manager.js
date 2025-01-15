@@ -378,7 +378,6 @@ export class BloomFilterManager {
     this.logger.debug(`Elements restored from temp file for instance : id ${this.instanceId}`);
     } catch (error) {
     this.logger.error('Error reading temp file:', error);
-    throw error;
   }
 }
 
