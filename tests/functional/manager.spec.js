@@ -18,7 +18,8 @@ test.group('BloomFilterManager Functional Tests', (group) => {
       fpRate: 0.0001,
       rotateTime: 5000, // 5 second for testing
       logger: console,
-      backupPeriod: 3000
+      backup: true,
+      backupTime: 3000, // 3 second for testing
     })
   })
 

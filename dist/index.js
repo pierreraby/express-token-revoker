@@ -37,9 +37,10 @@ const revokedJwtReplay = new client.Counter({
 /**
    * Logs or throttles messages based on the environment.
    * @param {string} message - The message to log or throttle.
-   * @param {boolean} [isError=false] - Whether the message is an error.
    * @param {Function} throttleFn - Throttle function.
    * @param {GenericLogger} logger - Any logger implementing the basic logging methods
+   * @param {boolean} [isError=false] - True if the message is an error.
+   * @returns {void}
    */
 const logOrThrottle = (message, throttleFn, logger, isError = false) => {
   if (process.env.NODE_ENV !== 'development') {
@@ -252,7 +253,8 @@ export class Revoker {
    * @property {number} numItems - Number of items to store in the Bloom filter.
    * @property {number} fpRate - Target false positive rate for the Bloom filter.
    * @property {number} rotateTime - Rotation interval in milliseconds.
-   * @property {number} [backupInterval] - Backup interval in milliseconds.
+   * @property {boolean} [backup] - whether to enable backup.
+   * @property {number} [backupTime] - Backup interval in milliseconds.
    * @property {GenericLogger} logger - Any logger implementing the basic logging methods
    * @typedef {ConfigBase & { claimsToCheck: Array<string>, opaqueHeader?: never }} JWTConfig
    * @typedef {ConfigBase & { opaqueHeader: string, claimsToCheck?: never }} OpaqueConfig
@@ -264,13 +266,14 @@ export class Revoker {
    * @throws {Error} If neither `claimsToCheck` nor `opaqueHeader` is provided.
    */
   constructor(config) {
-    const { numItems, fpRate, rotateTime, claimsToCheck, opaqueHeader, backupInterval, logger = console } = config;
+    const { numItems, fpRate, rotateTime, claimsToCheck, opaqueHeader, backup, backupTime, logger = console } = config;
 
     this.bloomFilterManager = new BloomFilterManager({
       numItems,
       fpRate,
       rotateTime, // 30 minutes
-      backupPeriod : backupInterval,
+      backup,
+      backupTime,
       logger
     });
 
@@ -290,6 +293,7 @@ export class Revoker {
   /**
    * Returns the configured middleware.
    * @returns {RequestHandler} Middleware Express.
+   * @throws {Error} If the middleware is not configured.
    */
   getMiddleware() {
     if (!this.middleware) {
@@ -301,13 +305,15 @@ export class Revoker {
   /**
    * Adds an item to the Bloom filter.
    * @param {string} filterItem - The item to add.
+   * @returns {void}
+   * @throws {Error} If the item is invalid.
    */
-  async add(filterItem) {
+  add(filterItem) {
     if (this.bloomFilterManager) {
       try {
-        await this.bloomFilterManager.add(filterItem);
+        this.bloomFilterManager.add(filterItem);
       } catch (error) {
-        throw error; // On propage l'erreur originale, pas juste le message
+        throw error; // propagate the error not only the message
       }
     }
   }
@@ -315,37 +321,31 @@ export class Revoker {
 
   /**
    * Resets and restore the Bloom filter.
+   * @returns {Promise<void>}
    */
-  reset() {
+  async resetAndRestore() {
     if (this.bloomFilterManager) {
-      this.bloomFilterManager.resetAndRestore();
+      await this.bloomFilterManager.resetAndRestore();
     }
   }
 
   /**
    * Resets the Bloom filter anc clears data.
+   * @returns {Promise<void>}
    */
   async resetAndClearData() {
     if (this.bloomFilterManager) {
-      this.bloomFilterManager.resetAndClearData();
+      await this.bloomFilterManager.resetAndClearData();
     }
   }
 
-  // /**
-  //  * Restores the Bloom filter from a backup file.
-  //  */
-  // restore() {
-  //   if (this.bloomFilterManager) {
-  //     this.bloomFilterManager.restore();
-  //   }
-  // }
-
   /**
    * Destroys the Bloom filter manager.
+   * @returns {void}
    */
-  async destroy() {
+  destroy() {
     if (this.bloomFilterManager) {
-      await this.bloomFilterManager.destroy();
+      this.bloomFilterManager.destroy();
       this.middleware = null;
       this.bloomFilterManager = null;
     }
