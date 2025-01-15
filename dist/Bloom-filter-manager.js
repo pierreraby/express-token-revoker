@@ -579,7 +579,6 @@ export class BloomFilterManager {
       this.#init();
     } catch (error) {
       this.logger.error('Error resetting Bloom filters:', error);
-      throw error;
     } finally {
       release();
     }

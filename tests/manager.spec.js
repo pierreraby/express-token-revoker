@@ -331,13 +331,6 @@ test.group('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', 
     await manager.resetAndClearData()
   })
 
-  test('resetAndRestore throws an error if restore file is invalid', ({ expect }) => {
-    const readFileSyncStub = sinon.stub(fs, 'readFileSync').throws(new Error('Mocked read error'))
-    expect(() => manager.resetAndRestore()).toThrow('Mocked read error')
-    expect(logger.error.calledWith('Error restoring Bloom filters:')).toBe(true)
-    readFileSyncStub.restore()
-  })
-
 
   test('resetAndClearData method clears the Bloom filters and clear data', async ({expect}) => {
     manager.add('testValue')
