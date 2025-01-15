@@ -1,88 +1,3 @@
-import { test } from '@japa/runner'
-import sinon from 'sinon'
-import { BloomFilterManager } from "../../dist/Bloom-filter-manager.js"
-import fs, { read } from 'fs'
-import path from 'path'
-import { dirname, join } from 'path'
-import { fileURLToPath } from 'url'
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-test.group('BloomFilterManager Functional Tests', (group) => {
-  let manager
-
-  group.each.setup(() => {
-    manager = new BloomFilterManager({
-      numItems: 1000,
-      fpRate: 0.0001,
-      rotateTime: 5000, // 5 second for testing
-      logger: console,
-      backup: true,
-      backupTime: 3000, // 3 second for testing
-    })
-  })
-
-  group.each.teardown(() => {
-   manager.destroy()
-  })
-
-  test('filters rotate correctly after rotateTime', async ({expect}) => {
-    manager.add('value1')
-    expect(manager.has('value1')).toBe(true)
-    // Wait for rotation to occur
-    await new Promise((resolve) => setTimeout(resolve, 1100)) // wait slightly more than rotateTime
-    manager.add('value2')
-    expect(manager.has('value1')).toBe(true)
-    expect(manager.has('value2')).toBe(true)
-  })
-
-  test('add method adds a string value', ({expect}) => {
-    manager.add('testValue')
-    expect(manager.has('testValue')).toBe(true)
-  })
-
-  test('add method throws error when adding non-string', ({ expect }) => {
-    expect(() => manager.add(123)).toThrow('Value must be a string');
-  });
-
-  test('has method returns true for added values', ({expect}) => {
-    const value = 'testValue'
-    manager.add(value)
-    expect(manager.has(value)).toBe(true)
-  })
-
-  test('has method returns false for non-added values', ({expect}) => {
-    expect(manager.has('nonExistent')).toBe(false)
-  })
-
-  test('reset method clears the Bloom filters and restore', async ({expect}) => {
-    manager.add('testValue')
-    await manager.resetAndRestore()
-    expect(manager.has('testValue')).toBe(true)
-  })
-
-  test('reset method clears the Bloom filters and clear data', async ({expect}) => {
-    manager.add('testValue')
-    await manager.resetAndClearData();
-    expect(manager.has('testValue')).toBe(false)
-  })
-
-  test('destroy method properly cleans up the manager', async ({ expect }) => {
-    const clearIntervalSpy = sinon.spy(global, 'clearInterval')
-    manager.destroy()
-    expect(manager.previous).toBeNull()
-    expect(manager.current).toBeNull()
-    expect(manager.rotationInterval).toBeNull()
-    expect(manager.backupInterval).toBeNull()
-    expect(clearIntervalSpy.called).toBe(true)
-    expect(clearIntervalSpy.calledTwice).toBe(true)
-    clearIntervalSpy.restore()
-  })
-
-
-
-
   // test('stopRotation method stops the rotation process', ({ expect }) => {
   //   const clearIntervalSpy = sinon.spy(global, 'clearInterval')
   //   manager.rotationInterval = setInterval(() => {}, 1000)
@@ -180,11 +95,11 @@ test.group('BloomFilterManager Functional Tests', (group) => {
   //   writeFileSyncStub.restore
   // })
   
-})
+// })
 
- test.group('test', (group) => {
+//  test.group('test', (group) => {
 
-})
+// })
 
 // test.group('BloomFilterManager _ensureBackupDirExists', (group) => {
 //   let manager

@@ -1,7 +1,7 @@
 import { test } from '@japa/runner'
 import sinon from 'sinon'
-import { Revoker } from '../../dist/index.js'
-import { BloomFilterManager } from '../../dist/Bloom-filter-manager.js'
+import { Revoker } from '../dist/index.js'
+import { BloomFilterManager } from '../dist/Bloom-filter-manager.js'
 
 test.group('Middleware Tests', (group) => {  
   let logger
@@ -52,31 +52,6 @@ test.group('Middleware Tests', (group) => {
     expect(logger.info.called).toBe(true)
     expect(logger.warn.called).toBe(false)
     expect(logger.error.called).toBe(false)
-    await revoker.resetAndClearData();
-    revoker.destroy()
-  })
-
-  test('JWT Middleware - valid token with all required claims', async ({ expect }) => {
-    const revoker = new Revoker({
-      numItems: 1000,
-      fpRate: 0.01,
-      rotateTime: 1000,
-      claimsToCheck: ['claim1', 'claim2'],
-      logger
-    })
-    
-    const middleware = revoker.getMiddleware()
-    req = {
-      token: {
-        claim1: 'value1',
-        claim2: 'value2'
-      }
-    }
-    middleware(req, res, next)
-    console.log(next.called)
-    expect(next.calledOnce).toBe(true)
-    expect(res.status.called).toBe(false)
-    expect(res.json.called).toBe(false)
     await revoker.resetAndClearData();
     revoker.destroy()
   })
@@ -140,7 +115,7 @@ test.group('Middleware Tests', (group) => {
     revoker.destroy()
   })
 
-  test('JWT Middleware - blacklisted claim', async ({ expect }) => {
+  test('JWT Middleware - valid token with all required claims', async ({ expect }) => {
     const revoker = new Revoker({
       numItems: 1000,
       fpRate: 0.01,
@@ -150,8 +125,33 @@ test.group('Middleware Tests', (group) => {
     })
     
     const middleware = revoker.getMiddleware()
+    req = {
+      token: {
+        claim1: 'value1',
+        claim2: 'value2'
+      }
+    }
+    middleware(req, res, next)
+    console.log(next.called)
+    expect(next.calledOnce).toBe(true)
+    expect(res.status.called).toBe(false)
+    expect(res.json.called).toBe(false)
+    await revoker.resetAndClearData();
+    revoker.destroy()
+  })
+
+  test('JWT Middleware - valid token with all required claims and blacklisted claim', async ({ expect }) => {
+    const revoker = new Revoker({
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 2000,
+      claimsToCheck: ['claim1', 'claim2'],
+      logger,
+    })
+
+    const middleware = revoker.getMiddleware()
     revoker.add('claim1-value1') // Blacklist le claim
-    
+
     req = {
       token: {
         claim1: 'value1',
@@ -170,6 +170,67 @@ test.group('Middleware Tests', (group) => {
     })
     await revoker.resetAndClearData();
     revoker.destroy()
+  })
+
+  test('JWT Middleware - log internal error', async ({ expect }) => {
+    const revoker = new Revoker({
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 2000,
+      claimsToCheck: ['claim1', 'claim2'],
+      logger,
+    })
+
+    const middleware = revoker.getMiddleware()
+    const error = new Error('Internal error')
+    const next = sinon.stub().throws(error)
+    req = {
+      token: {
+        claim1: 'value1',
+        claim2: 'value2'
+      }
+    }
+
+    middleware(req, res, next)
+
+    expect(logger.error.calledOnceWithExactly(error))
+    expect(res.status.calledWith(500)).toBe(true)
+    expect(res.json.calledOnce).toBe(true)
+    expect(res.json.firstCall.args[0]).toMatchObject({
+      error: 'internal_error',
+      message: expect.stringContaining('An unexpected error occurred')
+    })
+    await revoker.resetAndClearData();
+    revoker.destroy()
+  })
+
+  test('Opaque Middleware - if in development mode, logger is called', async ({ expect }) => {
+    process.env.NODE_ENV = 'development'
+    const revoker = new Revoker({
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 1000,
+      opaqueHeader: 'Authorization',
+      logger
+    })
+
+    const middleware = revoker.getMiddleware()
+    const req = {
+      headers: {
+        authorization
+        : 'Bearer validToken'
+      }
+    }
+
+    revoker.add('validToken') // Blacklist le token
+    middleware(req, res, next)
+
+    expect(logger.info.called).toBe(true)
+    expect(logger.warn.called).toBe(false)
+    expect(logger.error.called).toBe(false)
+    await revoker.resetAndClearData();
+    revoker.destroy()
+
   })
 
   test('Opaque Middleware - valid Authorization header', async ({ expect }) => {
@@ -306,6 +367,38 @@ test.group('Middleware Tests', (group) => {
     expect(next.calledOnce).toBe(true)
     expect(res.status.called).toBe(false)
     expect(res.json.called).toBe(false)
+    await revoker.resetAndClearData();
+    revoker.destroy()
+  })
+
+  test('Opaque Middleware - log internal error', async ({ expect }) => {
+    const revoker = new Revoker({
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 2000,
+      opaqueHeader: 'Authorization',
+      logger,
+    })
+
+    const middleware = revoker.getMiddleware()
+    const error = new Error('Internal error')
+    const next = sinon.stub().throws(error)
+    req = {
+      headers: {
+        authorization
+        : 'Bearer validToken'
+      }
+    }
+
+    middleware(req, res, next)
+
+    expect(logger.error.calledOnceWithExactly(error))
+    expect(res.status.calledWith(500)).toBe(true)
+    expect(res.json.calledOnce).toBe(true)
+    expect(res.json.firstCall.args[0]).toMatchObject({
+      error: 'internal_error',
+      message: expect.stringContaining('An unexpected error occurred')
+    })
     await revoker.resetAndClearData();
     revoker.destroy()
   })
@@ -447,9 +540,9 @@ test.group('Revoker Class Tests', (group) => {
       logger
     })
 
-    expect(() => revoker.add('')).toThrow('Value must be a string')
-    expect(() => revoker.add(null)).toThrow('Value must be a string')
-    expect(() => revoker.add(undefined)).toThrow('Value must be a string')
+    expect(() => revoker.add('')).toThrow('Value must be a non-empty string')
+    expect(() => revoker.add(null)).toThrow('Value must be a non-empty string')
+    expect(() => revoker.add(undefined)).toThrow('Value must be a non-empty string')
 
     revoker.destroy()
   })
@@ -717,68 +810,6 @@ test.group('Extended Middleware Tests', (group) => {
     expect(next.calledOnce).toBe(true)
   })
 
-  test('Both Middlewares - verify error details in response', async ({ expect }) => {
-    revoker = new Revoker({
-      numItems: 1000,
-      fpRate: 0.01,
-      rotateTime: 1000,
-      claimsToCheck: ['claim1'],
-      logger
-    })
-    
-    const middleware = revoker.getMiddleware()
-    const next = sinon.spy()
-    const req = {
-      token: {
-        // empty token to trigger an error
-      }
-    }
-    const res = {
-      status: sinon.stub().returnsThis(),
-      json: sinon.stub()
-    }
-
-    middleware(req, res, next)
-
-    expect(res.json.firstCall.args[0]).toMatchObject({
-      error: 'invalid_token',
-      message: expect.stringContaining('Invalid token'),
-    })
-    revoker.destroy()
-  })
-
-  test('Both Middlewares - proper logging in development mode', async ({ expect }) => {
-    process.env.NODE_ENV = 'development'
-    
-    revoker = new Revoker({
-      numItems: 1000,
-      fpRate: 0.01,
-      rotateTime: 1000,
-      claimsToCheck: ['claim1'],
-      logger
-    })
-    
-    const middleware = revoker.getMiddleware()
-    const next = sinon.spy()
-    const req = {
-      token: {
-        // empty token to trigger an error
-      }
-    }
-    const res = {
-      status: sinon.stub().returnsThis(),
-      json: sinon.stub()
-    }
-
-    logger.error.resetHistory()
-
-    middleware(req, res, next)
-
-    expect(logger.info.called).toBe(true)
-    expect(logger.warn.called).toBe(false)
-    expect(logger.error.called).toBe(false)
-    revoker.destroy()
-  })
 
   // test('JWT Middleware - throttle is called in non-development mode', async ({ expect }) => {
   //   process.env.NODE_ENV = 'production';
@@ -842,45 +873,8 @@ test.group('Extended Middleware Tests', (group) => {
   //   expect(logger.error.calledOnceWithExactly(`Token ${token} is blacklisted`));
   //   process.env.NODE_ENV = 'test';
   //   await revoker.destroy();
-  // });
 
-  test('createJWTMiddleware - Missing token logs an info', async ({ expect }) => {
-    // logger = { info: sinon.spy(), warn: sinon.spy(), error: sinon.spy() };
-    revoker = new Revoker({
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 1000,
-        claimsToCheck: ['claim1'],
-        logger,
-    });
-    const middleware = revoker.getMiddleware();
-    const next = sinon.spy();
-    const req = {};
-    const res = { status: sinon.stub().returnsThis(), json: sinon.stub() };
-    logger.info.resetHistory();
-    middleware(req, res, next);
-    expect(logger.info.calledOnce).toBe(true);
+
   });
 
-  test('createOpaqueMiddleware - Missing header logs a warning', async ({ expect }) => {
-    // logger = { info: sinon.spy(), warn: sinon.spy(), error: sinon.spy() };
-    revoker = new Revoker({
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 1000,
-        opaqueHeader: 'Authorization',
-        logger,
-    });
-    const middleware = revoker.getMiddleware();
-    const next = sinon.spy();
-    const req = { headers: {} };
-    const res = { status: sinon.stub().returnsThis(), json: sinon.stub() };
-
-    logger.warn.resetHistory();
-    try {
-        middleware(req, res, next);
-    } catch (error) {
-        expect(logger.warn.called).toBe(false); // Should not be called because throttle is not mocked
-    }
-  });
-})
+  

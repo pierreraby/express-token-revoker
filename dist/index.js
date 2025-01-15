@@ -192,7 +192,6 @@ const createOpaqueMiddleware = (header, bloomFilterManager, logger, throttleOpaq
     if (token && bloomFilterManager.has(token)) {
       revokedOpaqueReplay.inc();
       logOrThrottle(`Token ${token} is blacklisted`, throttleOpaque, logger, false);
-      logger.info(`Token ${token} is blacklisted`);
       return false;
     }
     return true;

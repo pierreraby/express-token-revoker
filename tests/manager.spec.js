@@ -1,7 +1,7 @@
 import { test } from '@japa/runner'
 import sinon from 'sinon'
 import fs from 'fs'
-import { BloomFilterManager } from '../../dist/Bloom-filter-manager.js'
+import { BloomFilterManager } from '../dist/Bloom-filter-manager.js'
 import { group, log } from 'console'
 import exp from 'constants'
 
@@ -179,14 +179,39 @@ test.group('BloomFilterManager Add and Has', (group) => {
     manager.destroy()
   })
 
+  test('add method adds a string value', ({expect}) => {
+    manager.add('testValue')
+    expect(manager.has('testValue')).toBe(true)
+  })
+
   test('add adds a value to the current filter', ({ expect }) => {
     const value = 'testValue'
     manager.add(value)
     expect(manager.has(value)).toBe(true)
   })
 
-  test('has returns false for a value not added', async ({ expect }) => {
+  test('add throw an error if value is empty', ({ expect }) => {
+    expect(() => manager.add('')).toThrow('Value must be a non-empty string')
+    expect(manager.logger.error.called).toBe(false)
+  })
+   test('add throw an error if value is not a string', ({ expect }) => {
+    expect(() => manager.add(123)).toThrow('Value must be a non-empty string')
+    expect(manager.logger.error.called).toBe(false)
+  })
+  test('add throw an error when write to file failed', ({ expect }) => {
+      sinon.stub(fs, 'appendFileSync').throws(new Error('Mocked write error'))
+      expect(() => manager.add('test')).toThrow('Mocked write error')
+      expect(manager.logger.error.calledWith('Error adding value to Bloom filter:')).toBe(true)
+  })
+
+  test('has method returns true for added values', ({expect}) => {
     const value = 'testValue'
+    manager.add(value)
+    expect(manager.has(value)).toBe(true)
+  })
+
+  test('has returns false for a value not added', async ({ expect }) => {
+    const value = 'nonExistent'
     await manager.resetAndClearData(); // 
     expect(manager.has(value)).toBe(false)
   })
@@ -197,22 +222,20 @@ test.group('BloomFilterManager Add and Has', (group) => {
     await new Promise(resolve => setTimeout(resolve, 600)) // Attendre la rotation
     expect(manager.has(value)).toBe(true)
   })
-   test('add throw an error if value is empty', ({ expect }) => {
-    expect(() => manager.add('')).toThrow('Value must be a string')
+
+  test('has throws an error if value is empty', ({ expect }) => {
+    expect(() => manager.has('')).toThrow('Value must be a non-empty string')
     expect(manager.logger.error.called).toBe(false)
   })
-   test('add throw an error if value is not a string', ({ expect }) => {
-    expect(() => manager.add(123)).toThrow('Value must be a string')
+
+  test('has throws an error if value is not a string', ({ expect }) => {
+    expect(() => manager.has(123)).toThrow('Value must be a non-empty string')
     expect(manager.logger.error.called).toBe(false)
   })
-  test('add throw an error when write to file failed', ({ expect }) => {
-      sinon.stub(fs, 'appendFileSync').throws(new Error('Mocked write error'))
-      expect(() => manager.add('test')).toThrow('Mocked write error')
-      expect(manager.logger.error.calledWith('Error adding value to Bloom filter:')).toBe(true)
-  })
+
 })
 
-test.group('BloomFilterManager ResetAndRestore and ResetAndClearData', (group) => {
+test.group('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', (group) => {
   let manager
   let logger
     
@@ -239,6 +262,14 @@ test.group('BloomFilterManager ResetAndRestore and ResetAndClearData', (group) =
     manager.destroy()
   })
 
+  test('resetAndRestore method clears the Bloom filters and restore', async ({expect}) => {
+    manager.add('testValue')
+    await manager.resetAndRestore()
+    expect(manager.has('testValue')).toBe(true)
+    await manager.resetAndClearData()
+  })
+
+  
   test('resetAndRestore resets timers and restore intervall', async ({ expect }) => {
     manager.add('testValue')
     await manager.resetAndRestore()
@@ -299,6 +330,12 @@ test.group('BloomFilterManager ResetAndRestore and ResetAndClearData', (group) =
     await manager.resetAndClearData()
   })
 
+  test('reset method clears the Bloom filters and clear data', async ({expect}) => {
+    manager.add('testValue')
+    await manager.resetAndClearData();
+    expect(manager.has('testValue')).toBe(false)
+  })
+
   test('resetAndClearData resets filters and deletes backup files', async ({ expect }) => {
     manager.add('testValue')
     await new Promise(resolve => setTimeout(resolve, 600)) // await backup
@@ -319,6 +356,20 @@ test.group('BloomFilterManager ResetAndRestore and ResetAndClearData', (group) =
     await manager.resetAndClearData()
     expect(manager.previousDone).toBe(false)
   })
+
+  test('destroy method properly cleans up the manager', async ({ expect }) => {
+    const clearIntervalSpy = sinon.spy(global, 'clearInterval')
+    manager.destroy()
+    expect(manager.previous).toBeNull()
+    expect(manager.current).toBeNull()
+    expect(manager.rotationInterval).toBeNull()
+    expect(manager.backupInterval).toBeNull()
+    expect(clearIntervalSpy.called).toBe(true)
+    expect(clearIntervalSpy.calledTwice).toBe(true)
+    clearIntervalSpy.restore()
+  })
+
+
 })
 
 test.group('BloomFilterManager Rotation', (group) => {
@@ -368,6 +419,15 @@ test.group('BloomFilterManager Rotation', (group) => {
       expect(manager.current).not.toBe(initialCurrent)
   })
 
+  test('filters rotate correctly after rotateTime', async ({expect}) => {
+    manager.add('value1')
+    expect(manager.has('value1')).toBe(true)
+    // Wait for rotation to occur
+    await new Promise((resolve) => setTimeout(resolve, 600)) // wait slightly more than rotateTime
+    manager.add('value2')
+    expect(manager.has('value1')).toBe(true)
+    expect(manager.has('value2')).toBe(true)
+  })
 
 })
 
