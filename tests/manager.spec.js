@@ -174,8 +174,9 @@ test.group('BloomFilterManager Add and Has', (group) => {
     })
   })
 
-  group.each.teardown(() => {
+  group.each.teardown(async () => {
     sinon.restore()
+    await manager.resetAndClearData()
     manager.destroy()
   })
 
@@ -391,8 +392,9 @@ test.group('BloomFilterManager Rotation', (group) => {
       })
   })
 
-  group.teardown(() => {
+  group.teardown(async () => {
     sinon.restore()
+    await manager.resetAndClearData()
     manager.destroy()
   })
 
