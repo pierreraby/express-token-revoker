@@ -564,6 +564,67 @@ export class BloomFilterManager {
   }
 
   /**
+   * Get the estimated metrics of the current and previous Bloom filter.
+   * @returns {Object} An object containing:
+   *   - currentCount: {number} Estimated number of items in current filter (0 if no filter)
+   *   - previousCount: {number} Estimated number of items in previous filter (0 if no filter)
+   *   - currentFpRate: {number} Estimated false positive rate of current filter (0 if no filter)
+   *   - previousFpRate: {number} Estimated false positive rate of previous filter (0 if no filter)
+   * @throws {Error} If an error occurs while accessing filter metrics
+   */
+  #getEstimatedMetrics() {
+    try {
+      const metrics = {
+        currentCount: 0,
+        previousCount: 0,
+        currentFpRate: 0,
+        previousFpRate: 0
+      };
+      if (this.current) {
+        metrics.currentCount = this.current.size();
+        metrics.currentFpRate = this.current.error();
+      }
+
+      if (this.previous && this.previousDone) {
+        metrics.previousCount = this.previous.size();
+        metrics.previousFpRate = this.previous.error();
+      } else if (!this.previousDone) {
+        this.logger.debug('No previous filter to get metrics before first rotation');
+      }
+      this.logger.info(`Estimated metrics: ${JSON.stringify(metrics)}`);
+
+      return metrics;
+    } catch (error) {
+      this.logger.error('Error getting estimated metrics:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get metrics of the current and previous Bloom filter.
+   * @returns {Object} An object containing:
+   * - estimated metrics: {Object} Estimated metrics of the current and previous filters
+   * - configuration: {Object} Configuration of the Bloom filter manager
+   * @throws {Error} If an error occurs while getting metrics
+   */
+  getMetrics() {
+    try {
+      const estimateMetrics = this.#getEstimatedMetrics();
+      const configuration = {
+        numItems: this.numItems,
+        fpRate: this.fpRate,
+        rotateTime: this.rotateTime,
+        backupEnabled: this.backupEnabled,
+        backupTime: this.backupTime
+      };
+      return { estimatedMetrics: estimateMetrics, configuration };
+    } catch (error) {
+        this.logger.error('Error getting metrics:', error);
+        throw error;
+    }
+  }
+
+  /**
    * Resets and restore the Bloom filters.
    * @returns {Promise<void>}
    * @throws {Error} If an error occurs while resetting the filters.

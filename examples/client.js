@@ -96,5 +96,16 @@ for (let i = 0; i < tokens.length; i++) {
 }
 console.log(`Verified ${valid} valid tokens and ${invalid} invalid tokens`);
 
+const metricsResponse = await fetch('http://localhost:3000/metrics', {
+  method: 'GET',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${adminToken}`,
+  },
+});
+const metrics = await metricsResponse.json();
+
+console.log(metrics);
+
 
 

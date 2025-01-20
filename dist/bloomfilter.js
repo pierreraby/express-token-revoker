@@ -1,4 +1,11 @@
 /**
+ * Copyright (c) 2018, Jason Davies
+ * Copyright (c) 2025, Pierre Raby
+ * 
+ * Minor modifications made by Pierre Raby: use of Class syntax and JSDoc annotations.
+*/
+
+/**
  * @typedef {number | number[]} MParam
  * A number specifying the total bits of the filter, or an array-like object of 32-bit integers.
  */

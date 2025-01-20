@@ -90,12 +90,17 @@ app.post('/reset', admin, (req, res) => {
   }
 });
 
-// Endpoint to expose Prometheus metrics
-app.get('/metrics', async (req, res) => {
-  const metrics = await client.register.metrics();
-  res.set('Content-Type', client.register.contentType);
-  res.end(metrics);
+// Endpoint to expose JWTrevoker metrics
+app.get('/metrics', (req, res) => {
+  try {
+    const metrics  =  JWTrevoker.getMetrics();
+    res.status(200).json(metrics);
+  } catch(error) {
+    res.status(500).json({ message: `Error: ${ error }` });
+  }
 });
+
+
 
 // Start the HTTP server
 app.listen(port, () => {
