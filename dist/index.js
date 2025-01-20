@@ -26,13 +26,7 @@
  */
 
 import { BloomFilterManager } from "./Bloom-filter-manager.js";
-import client from 'prom-client';
 import throttle from "throttleit";
-
-const revokedJwtReplay = new client.Counter({
-  name: 'revoked_jwt_tokens',
-  help: 'Number of revoked JWT tokens',
-});
 
 /**
    * Logs or throttles messages based on the environment.
@@ -88,7 +82,6 @@ const createJWTMiddleware = (claimsToCheck, bloomFilterManager, logger, throttle
     }
 
     if (bloomFilterManager.has(`${claim}-${token[claim]}`)) {
-      revokedJwtReplay.inc();
       logOrThrottle(`Token ${claim}-${token[claim]} is blacklisted`, throttleJWT, logger, false);
       return false;
     }
@@ -133,13 +126,6 @@ const createJWTMiddleware = (claimsToCheck, bloomFilterManager, logger, throttle
     }
   };
 };
-
-const revokedOpaqueReplay = new client.Counter({
-  name: 'revoked_opaque_tokens',
-  help: 'Number of revoked opaque tokens',
-});
-
-// @param {Function} throttleOpaque - Throttle function.
 
 /**
  * Middleware factory to check opaque token with the Bloom filter.
@@ -190,7 +176,6 @@ const createOpaqueMiddleware = (header, bloomFilterManager, logger, throttleOpaq
    */
   const validateToken = (token, bloomFilterManager) => {
     if (token && bloomFilterManager.has(token)) {
-      revokedOpaqueReplay.inc();
       logOrThrottle(`Token ${token} is blacklisted`, throttleOpaque, logger, false);
       return false;
     }
@@ -242,10 +227,10 @@ export class Revoker {
   middleware = null;
 
   /** @type {Function} */
-  throttleJWT = () => {};
+  throttleLog = () => {};
 
-  /** @type {Function} */
-  throttleOpaque = () => {};
+  /** @type {string} */
+  id;
 
   /**
    * @typedef {Object} ConfigBase
@@ -276,13 +261,24 @@ export class Revoker {
       logger
     });
 
-    this.throttleJWT = throttle((message) => logger.info(message), 60000);
-    this.throttleOpaque = throttle((message) => logger.info(message), 60000);
+    this.throttleLog = throttle((message) => logger.info(message), 60000);
+
+    this.id = Math.random().toString(36).substring(7);
 
     if (claimsToCheck) {
-      this.middleware = createJWTMiddleware(claimsToCheck , this.bloomFilterManager, logger, this.throttleJWT);
+      this.middleware = createJWTMiddleware(
+        claimsToCheck,
+        this.bloomFilterManager,
+        logger,
+        this.throttleLog,
+      );
     } else if (opaqueHeader) {
-      this.middleware = createOpaqueMiddleware(opaqueHeader, this.bloomFilterManager, logger, this.throttleOpaque);
+      this.middleware = createOpaqueMiddleware(
+        opaqueHeader,
+        this.bloomFilterManager,
+        logger,
+        this.throttleLog,
+      );
     } else {
       this.bloomFilterManager.destroy();
       throw new Error("claimsToCheck or opaqueHeader must be provided");
@@ -312,7 +308,22 @@ export class Revoker {
       try {
         this.bloomFilterManager.add(filterItem);
       } catch (error) {
-        throw error; // propagate the error not only the message
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Get metrics for the Bloom filter.
+   * @returns {Object} Metrics object.
+   * @throws {Error} If the Bloom filter manager is not initialized.
+   */
+  getMetrics() {
+    if (this.bloomFilterManager) {
+      try {
+        return this.bloomFilterManager.getMetrics();
+      } catch (error) {
+        throw error; 
       }
     }
   }
@@ -350,8 +361,6 @@ export class Revoker {
     }
   }
 }
-
-export const counters = { revokedJwtReplay, revokedOpaqueReplay };
 
 
 

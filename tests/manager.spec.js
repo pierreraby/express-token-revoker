@@ -434,6 +434,73 @@ test.group('BloomFilterManager Rotation', (group) => {
 
 })
 
+test.group('BloomFilterManager metrics', (group) => {
+  let manager
+  let logger
+
+  group.setup(() => {
+    logger = {
+      info: sinon.spy(),
+      warn: sinon.spy(),
+      debug: sinon.spy(),
+      error: sinon.spy()
+    }
+    manager = new BloomFilterManager({
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 500, // Temps de rotation court pour les tests
+      logger
+    })
+  })
+
+  group.teardown(async () => {
+    sinon.restore()
+    await manager.resetAndClearData()
+    manager.destroy()
+  })
+
+//   test('getEstimatedMetrics returns correct values after init', async ({expect}) => {
+//     logger.info.resetHistory()
+//     const metrics = manager.getEstimatedMetrics()
+//     expect(metrics.currentCount).toBe(-0)
+//     expect(metrics.currentFpRate).toBe(0)
+//     expect(metrics.previousCount).toBe(0)
+//     expect(metrics.previousFpRate).toBe(0)
+//   })
+
+//   test('getEstimatedMetricx returns correct values after filling current filter', async ({expect}) => {
+//     manager.add('value1')
+//     manager.add('value2')
+//     const metrics = manager.getEstimatedMetrics()
+//     expect(metrics.currentCount).toBeCloseTo(2)
+//     expect(metrics.currentFpRate).toBeCloseTo(0.0001, 4)
+//     expect(metrics.previousCount).toBe(0)
+//     expect(metrics.previousFpRate).toBe(0)
+//   })
+
+//   test('metrics returns correct values after backup enabled', async ({expect}) => {
+//     manager = new BloomFilterManager({
+//       numItems: 1000,
+//       fpRate: 0.01,
+//       rotateTime: 500, // Temps de rotation court pour les tests
+//       logger,
+//       backup: true,
+//       backupTime: 500
+//     })
+//     const metrics = manager.metrics()
+//     expect(metrics.numItems).toBe(1000)
+//     expect(metrics.fpRate).toBe(0.01)
+//     expect(metrics.rotateTime).toBe(500)
+//     expect(metrics.backup).toBe(true)
+//     expect(metrics.backupTime).toBe(500)
+//     expect(metrics.previousDone).toBe(false)
+//     expect(metrics.current).not.toBe(null)
+//     expect(metrics.previous).toBe(null)
+//   })
+
+})
+
+// private methods
 // test.group('BloomFilterManager Error Handling', (group) => {
 //   let manager
 //   let createBloomFilterStub
