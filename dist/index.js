@@ -27,6 +27,7 @@
 
 import { BloomFilterManager } from "./Bloom-filter-manager.js";
 import throttle from "throttleit";
+import { registerRevokerInstance, unregisterRevokerInstance, startServer } from "./grpc/standalone-server.js";
 
 /**
    * Logs or throttles messages based on the environment.
@@ -201,7 +202,7 @@ const createOpaqueMiddleware = (header, bloomFilterManager, logger, throttleOpaq
         });
       }
     } catch (error) {
-      // Gérer les erreurs inattendues (par exemple, une erreur dans le bloomFilterManager)
+      // Handle unexpected errors (e.g., an error in the bloomFilterManager)
       logger.error(`Unexpected error during JWT validation: ${error.message}`);
       res.status(500).json({
         error: "internal_error",
@@ -232,14 +233,23 @@ export class Revoker {
   /** @type {string} */
   id;
 
+  /** @type {boolean} */
+  grpcEnabled;
+
+  /** @type {string | undefined} */
+  grpcPort;
+
   /**
    * @typedef {Object} ConfigBase
    * @property {number} numItems - Number of items to store in the Bloom filter.
    * @property {number} fpRate - Target false positive rate for the Bloom filter.
    * @property {number} rotateTime - Rotation interval in milliseconds.
+   * @property {string} id - The ID of the Revoker instance.
    * @property {boolean} [backup] - whether to enable backup.
    * @property {number} [backupTime] - Backup interval in milliseconds.
    * @property {GenericLogger} logger - Any logger implementing the basic logging methods
+   * @property {boolean} [grpcEnabled] - Whether to enable gRPC.
+   * @property {string} [grpcPort] - The port for the gRPC server.
    * @typedef {ConfigBase & { claimsToCheck: Array<string>, opaqueHeader?: never }} JWTConfig
    * @typedef {ConfigBase & { opaqueHeader: string, claimsToCheck?: never }} OpaqueConfig
    * @typedef {JWTConfig | OpaqueConfig} Config
@@ -250,12 +260,13 @@ export class Revoker {
    * @throws {Error} If neither `claimsToCheck` nor `opaqueHeader` is provided.
    */
   constructor(config) {
-    const { numItems, fpRate, rotateTime, claimsToCheck, opaqueHeader, backup, backupTime, logger = console } = config;
+    const { numItems, fpRate, rotateTime, id, claimsToCheck, opaqueHeader, backup, backupTime, logger = console, grpcEnabled = false, grpcPort  } = config;
 
     this.bloomFilterManager = new BloomFilterManager({
       numItems,
       fpRate,
-      rotateTime, // 30 minutes
+      rotateTime,
+      id,
       backup,
       backupTime,
       logger
@@ -263,7 +274,7 @@ export class Revoker {
 
     this.throttleLog = throttle((message) => logger.info(message), 60000);
 
-    this.id = Math.random().toString(36).substring(7);
+    this.id = id;
 
     if (claimsToCheck) {
       this.middleware = createJWTMiddleware(
@@ -282,6 +293,19 @@ export class Revoker {
     } else {
       this.bloomFilterManager.destroy();
       throw new Error("claimsToCheck or opaqueHeader must be provided");
+    }
+
+    this.grpcEnabled = grpcEnabled;
+    this.grpcPort = grpcPort;
+
+    if (this.grpcEnabled) {
+      registerRevokerInstance(this);
+      if (!global.grpcServerStarted && this.grpcPort) {
+        console.log("Starting gRPC server with id: ", this.id);
+        console.log("grpcEnabled: ", this.grpcEnabled);
+        startServer(this.grpcPort);
+        global.grpcServerStarted = true;
+      }
     }
   }
 
@@ -310,6 +334,22 @@ export class Revoker {
       } catch (error) {
         throw error;
       }
+    } else {
+      throw new Error("Bloom filter manager not initialized");
+    }
+  }
+
+  /**
+   * Checks if an item exists in the Bloom filter.
+   * @param {string} item - The item to check.
+   * @returns {boolean} True if the item may exist, false otherwise.
+   * @throws {Error} If the Bloom filter manager is not initialized.
+   */
+  has(item) {
+    if (this.bloomFilterManager) {
+      return this.bloomFilterManager.has(item);
+    } else {
+      throw new Error("Bloom filter manager not initialized");
     }
   }
 
@@ -319,15 +359,17 @@ export class Revoker {
    * @throws {Error} If the Bloom filter manager is not initialized.
    */
   getMetrics() {
-    if (this.bloomFilterManager) {
-      try {
-        return this.bloomFilterManager.getMetrics();
-      } catch (error) {
-        throw error; 
-      }
-    }
-  }
 
+      if (this.bloomFilterManager) {
+        try {
+          return this.bloomFilterManager.getMetrics();
+        } catch (error) {
+          throw error; 
+        }
+      } else {
+        throw new Error("Bloom filter manager not initialized");
+      }
+  }
 
   /**
    * Resets and restore the Bloom filter.
@@ -336,6 +378,8 @@ export class Revoker {
   async resetAndRestore() {
     if (this.bloomFilterManager) {
       await this.bloomFilterManager.resetAndRestore();
+    } else {
+      throw new Error("Bloom filter manager not initialized");
     }
   }
 
@@ -346,14 +390,18 @@ export class Revoker {
   async resetAndClearData() {
     if (this.bloomFilterManager) {
       await this.bloomFilterManager.resetAndClearData();
+    } else {
+      throw new Error("Bloom filter manager not initialized");
     }
   }
-
   /**
    * Destroys the Bloom filter manager.
    * @returns {void}
    */
   destroy() {
+    if (this.grpcEnabled) {
+      unregisterRevokerInstance(this.id);
+    }
     if (this.bloomFilterManager) {
       this.bloomFilterManager.destroy();
       this.middleware = null;
