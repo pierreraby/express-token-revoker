@@ -27,6 +27,7 @@ const __dirname = dirname(__filename)
  * @property {number} numItems - Number of items to store in the filter.
  * @property {number} fpRate - Target false positive rate.
  * @property {number} rotateTime - Filter rotation interval in milliseconds.
+ * @property {string} id - The id of the bloom filter (same as the revoker id).
  * @property {boolean} [backup] - whether to enable backup.
  * @property {number} [backupTime] - Backup interval in milliseconds.
  * @property {GenericLogger} logger - Any logger implementing the basic logging methods
@@ -78,9 +79,9 @@ export class BloomFilterManager {
 
   /**
    * @private
-   * @type {number}
+   * @type {string}
    */
-  instanceId;
+  id;
 
   /**
    * @private
@@ -125,18 +126,12 @@ export class BloomFilterManager {
    mutex
 
   /**
-   * @private
-   * @type {number}
-   */
-    static count = 1;
-
-  /**
    * Creates an instance of BloomFilterManager.
    * @param {BloomFilterOptions} options - Bloom filter configuration.
    */
   constructor(options) {
 
-    const { numItems, fpRate, rotateTime, backup, backupTime, logger } = options;
+    const { numItems, fpRate, rotateTime, id, backup, backupTime, logger } = options;
 
     if (!numItems || !Number.isInteger(numItems)  || numItems <= 0) {
       logger.error('numItems must be a positive integer.');
@@ -174,7 +169,7 @@ export class BloomFilterManager {
     }
 
 
-    this.instanceId = BloomFilterManager.count++;
+    this.id = id;
 
     /** @private */
     this.numItems = numItems;
@@ -200,9 +195,9 @@ export class BloomFilterManager {
     this.current = this.#createBloomFilter();
 
     this.backupDir = path.join(__dirname, '../backup');
-    this.backupCurrentPath = path.join(this.backupDir, `current-${this.instanceId}.blob`);
-    this.backupPreviousPath = path.join(this.backupDir, `previous-${this.instanceId}.blob`);
-    this.backupTempFilePath = path.join(this.backupDir, `temp-${this.instanceId}.txt`);
+    this.backupCurrentPath = path.join(this.backupDir, `current-${this.id}.blob`);
+    this.backupPreviousPath = path.join(this.backupDir, `previous-${this.id}.blob`);
+    this.backupTempFilePath = path.join(this.backupDir, `temp-${this.id}.txt`);
 
     this.#init();
 
@@ -319,17 +314,17 @@ export class BloomFilterManager {
         }
 
         if (!filter) {
-          throw new Error(`There is no ${name} filter to backup on instance : ${this.instanceId}`);
+          throw new Error(`There is no ${name} filter to backup on instance : ${this.id}`);
         }
 
         // @ts-ignore
         const buffer = Buffer.from(filter.buckets.buffer);
         await fs.promises.writeFile(filePath, buffer);
-        this.logger.debug(`Saved ${name} filter : id ${this.instanceId}`);
+        this.logger.debug(`Saved ${name} filter : id ${this.id}`);
 
         if (name === "current") {
           await fs.promises.writeFile(this.backupTempFilePath, '');
-          this.logger.debug(`Temp file cleared for instance ${this.instanceId}`);
+          this.logger.debug(`Temp file cleared for instance ${this.id}`);
         }
       }
     } catch (error) {
@@ -375,7 +370,7 @@ export class BloomFilterManager {
       }
     }
 
-    this.logger.debug(`Elements restored from temp file for instance : id ${this.instanceId}`);
+    this.logger.debug(`Elements restored from temp file for instance : id ${this.id}`);
     } catch (error) {
     this.logger.error('Error reading temp file:', error);
   }
@@ -399,7 +394,7 @@ export class BloomFilterManager {
     // current filter already init in constructor but is mandatory
     // jsdoc is not able to understand that
     if (!this.current) {
-      this.logger.warn(`No current filter instance found for id ${this.instanceId}. Creating a new one.`);
+      this.logger.warn(`No current filter instance found for id ${this.id}. Creating a new one.`);
       this.current = this.#createBloomFilter();
     }
 
@@ -412,13 +407,13 @@ export class BloomFilterManager {
           const buffer = fs.readFileSync(filePath);
           const buckets = new Int32Array(buffer.buffer, buffer.byteOffset, buffer.length / Int32Array.BYTES_PER_ELEMENT);
           this[name] = new BloomFilter(Array.from(buckets), this.current.k);
-          this.logger.debug(`Restored ${name} filter : id ${this.instanceId}`);
+          this.logger.debug(`Restored ${name} filter : id ${this.id}`);
         } catch (error) {
             this.logger.error(`Restore failed for ${name} filter: ${error.message}`);
             this[name] = this.#createBloomFilter();
         }
       } else {
-        this.logger.warn(`No ${name} backup to restore for instance : id ${this.instanceId}`);
+        this.logger.warn(`No ${name} backup to restore for instance : id ${this.id}`);
       }
     }
     if (this.#tempFileExistsAndNotEmpty()) {
