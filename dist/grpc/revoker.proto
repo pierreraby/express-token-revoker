@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package revoker;
+
+service RevokerAdmin {
+  rpc Add (AddRequest) returns (AddResponse) {}
+  rpc Has (HasRequest) returns (HasResponse) {}
+  rpc GetMetrics (GetMetricsRequest) returns (GetMetricsResponse) {}
+  rpc ResetAndRestore (ResetAndRestoreRequest) returns (ResetAndRestoreResponse) {}
+  rpc ResetAndClearData (ResetAndClearDataRequest) returns (ResetAndClearDataResponse) {}
+  rpc Destroy (DestroyRequest) returns (DestroyResponse) {}
+}
+
+message AddRequest {
+  string revokerId = 1;
+  string filterItem = 2;
+}
+
+message AddResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message HasRequest {
+  string revokerId = 1;
+  string item = 2;
+}
+
+message HasResponse {
+  bool exists = 1;
+}
+
+message GetMetricsRequest {
+  string revokerId = 1;
+}
+
+message GetMetricsResponse {
+  map<string, string> metrics = 1;
+}
+
+message ResetAndRestoreRequest {
+  string revokerId = 1;
+}
+
+message ResetAndRestoreResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ResetAndClearDataRequest {
+  string revokerId = 1;
+}
+
+message ResetAndClearDataResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message DestroyRequest {
+  string revokerId = 1;
+}
+
+message DestroyResponse {
+  bool success = 1;
+  string message = 2;
+}
