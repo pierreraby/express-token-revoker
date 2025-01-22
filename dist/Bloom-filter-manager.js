@@ -442,7 +442,7 @@ export class BloomFilterManager {
     try {
       if (await fs.promises.stat(filePath).then(() => true).catch(() => false)) {
         await fs.promises.unlink(filePath);
-        this.logger.debug(`${fileType} backup file deleted.`);
+        this.logger.debug(`${fileType} backup file deleted for instance : id ${this.id}`);
       }
     } catch (error) {
       this.logger.error(`Error deleting ${fileType} backup file:`, error);
@@ -484,7 +484,7 @@ export class BloomFilterManager {
     if (this.rotationInterval !== null) {
       clearInterval(this.rotationInterval);
       this.rotationInterval = null;
-      this.logger.debug(`Bloom filter rotation stopped. Interval is now: ${this.rotationInterval}`);
+      this.logger.debug(`Rotation stopped for id: ${this.id}`);
     }
   }
 
@@ -496,7 +496,7 @@ export class BloomFilterManager {
     if (this.backupInterval !== null) {
       clearInterval(this.backupInterval);
       this.backupInterval = null;
-      this.logger.debug(`Bloom filter backup stopped. Interval is now: ${this.rotationInterval}`);
+      this.logger.debug(`Backup stopped for id: ${this.id}`);
     }
   }
   /* c8 ignore stop */
