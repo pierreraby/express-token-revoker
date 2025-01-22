@@ -162,7 +162,17 @@ const revokerService = {
     } else {
       callback(null, { success: false, message: 'Revoker instance not found' });
     }
-  }
+  },
+  /**
+   * @param {grpc.ServerUnaryCall<any, any>} call
+   * @param {grpc.sendUnaryData<any>} callback
+   * @returns {void}
+   */
+  ListRevokers: (call, callback) => {
+    const revokerIds = Array.from(revokerInstances.keys());
+    callback(null, { revokerIds });
+  },
+
 };
 
 /**

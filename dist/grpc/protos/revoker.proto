@@ -9,6 +9,7 @@ service RevokerAdmin {
   rpc ResetAndRestore (ResetAndRestoreRequest) returns (ResetAndRestoreResponse) {}
   rpc ResetAndClearData (ResetAndClearDataRequest) returns (ResetAndClearDataResponse) {}
   rpc Destroy (DestroyRequest) returns (DestroyResponse) {}
+  rpc ListRevokers (ListRevokersRequest) returns (ListRevokersResponse) {} 
 }
 
 message AddRequest {
@@ -63,4 +64,10 @@ message DestroyRequest {
 message DestroyResponse {
   bool success = 1;
   string message = 2;
+}
+
+message ListRevokersRequest {}
+
+message ListRevokersResponse {
+  repeated string revokerIds = 1;
 }
