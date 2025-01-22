@@ -47,10 +47,9 @@ for (let i = 0; i < tokens.length; i++) {
       'Authorization': `Bearer ${tokens[i]}`,
     },
   });
-  const data = await verify.json();
-  if (!data.error) {
+  if (verify.status === 200) {
     cpt++;
-  }
+  } 
 }
 console.log(`Verified ${cpt} tokens in the whitelist`);
 
@@ -66,9 +65,14 @@ for (let i = 0; i < tokens.length/2; i++) {
       'Authorization': `Bearer ${adminToken}`,
     },
   });
-  const data = await revoke.json();
-  if (!data.error) {
+  if (revoke.status === 200) {
     cpt++;
+  }
+  if (i === 10) {
+    console.log(revoke.status);
+    console.log(revoke.statusText);
+    const data = await revoke.json();
+    console.log(data);
   }
 }
 console.log(`Revoked ${cpt} tokens`);

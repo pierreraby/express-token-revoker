@@ -26,7 +26,7 @@ app.post('/revoke/:claim/:value', admin, JWTfilter, async (req, res) => {
   try {
     const { claim, value } = req.params;
     const filterItem = `${claim}-${value}`;
-    await JWTrevoker.add(filterItem);
+    JWTrevoker.add(filterItem);
     res.status(200).json({ message: 'Token revoked' });
   } catch(error) {
     res.status(500).json({ message: `Error: ${ error }` });
@@ -42,7 +42,7 @@ app.get('/protected2', opaqueFilter, (req, res) => {
 app.post('/revoke2/:token', admin, JWTfilter, async (req, res) => {
   const { token } = req.params;
   try {
-    await opaqueRevoker.add(token);
+    opaqueRevoker.add(token);
     res.status(200).json({ message: 'Token revoked' });
   } catch(error) {
     res.status(500).json({ message: `Error: ${ error }` });
