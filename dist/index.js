@@ -27,7 +27,7 @@
 
 import { BloomFilterManager } from "./Bloom-filter-manager.js";
 import throttle from "throttleit";
-import { registerRevokerInstance, unregisterRevokerInstance, startServer } from "./grpc/standalone-server.js";
+import { registerRevokerInstance, startServer } from "./grpc/standalone-server.js";
 
 /**
    * Logs or throttles messages based on the environment.
@@ -399,9 +399,6 @@ export class Revoker {
    * @returns {void}
    */
   destroy() {
-    if (this.grpcEnabled) {
-      unregisterRevokerInstance(this.id);
-    }
     if (this.bloomFilterManager) {
       this.bloomFilterManager.destroy();
       this.middleware = null;
