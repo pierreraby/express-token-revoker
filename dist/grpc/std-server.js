@@ -99,10 +99,8 @@ const revokerService = {
       try {
         const metrics = revokerInstance.getMetrics();
         callback(null, {
-          metrics: {
-            estimatedMetrics: JSON.stringify(metrics.estimatedMetrics),
-            configuration: JSON.stringify(metrics.configuration)
-          }
+          estimatedMetrics: metrics.estimatedMetrics,
+          configuration: metrics.configuration
         });
       } catch (error) {
         callback({ code: grpc.status.INTERNAL, message: error.message });
@@ -116,11 +114,31 @@ const revokerService = {
    * @param {grpc.sendUnaryData<any>} callback
    * @returns {void}
    */
+  // ResetAndRestore: (call, callback) => {
+  //   const { revokerId } = call.request;
+  //   const revokerInstance = revokerInstances.get(revokerId);
+  //   if (revokerInstance) {
+  //     revokerInstance.resetAndRestore().then(() => {
+  //       callback(null, { success: true });
+  //     }).catch(error => {
+  //       callback(null, { success: false, message: error.message });
+  //     });
+  //   } else {
+  //     callback(null, { success: false, message: 'Revoker instance not found' });
+  //   }
+  // },
   ResetAndRestore: (call, callback) => {
     const { revokerId } = call.request;
     const revokerInstance = revokerInstances.get(revokerId);
     if (revokerInstance) {
-      revokerInstance.resetAndRestore().then(() => {
+      const timeout = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout')), 5000)
+      );
+      
+      Promise.race([
+        revokerInstance.resetAndRestore(),
+        timeout
+      ]).then(() => {
         callback(null, { success: true });
       }).catch(error => {
         callback(null, { success: false, message: error.message });
@@ -134,11 +152,31 @@ const revokerService = {
    * @param {grpc.sendUnaryData<any>} callback
    * @returns {void}
    */
-  ResetAndClearData: (call, callback) => {
+  // ResetAndClearData: (call, callback) => {
+  //   const { revokerId } = call.request;
+  //   const revokerInstance = revokerInstances.get(revokerId);
+  //   if (revokerInstance) {
+  //     revokerInstance.resetAndClearData().then(() => {
+  //       callback(null, { success: true });
+  //     }).catch(error => {
+  //       callback(null, { success: false, message: error.message });
+  //     });
+  //   } else {
+  //     callback(null, { success: false, message: 'Revoker instance not found' });
+  //   }
+  // },
+    ResetAndClearData: (call, callback) => {
     const { revokerId } = call.request;
     const revokerInstance = revokerInstances.get(revokerId);
     if (revokerInstance) {
-      revokerInstance.resetAndClearData().then(() => {
+      const timeout = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout')), 5000)
+      );
+      
+      Promise.race([
+        revokerInstance.resetAndClearData(),
+        timeout
+      ]).then(() => {
         callback(null, { success: true });
       }).catch(error => {
         callback(null, { success: false, message: error.message });

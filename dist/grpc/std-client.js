@@ -64,8 +64,8 @@ client.GetMetrics({ revokerId: 'JWTrevoker' }, (err, response) => {
   if (err) {
     console.error('Error:', err);
   } else {
-    const estimatedMetrics = JSON.parse(response.metrics.estimatedMetrics);
-    const configuration = JSON.parse(response.metrics.configuration);
+    const estimatedMetrics = response.estimatedMetrics;
+    const configuration = response.configuration;
     
     console.log('Estimated Metrics:', estimatedMetrics);
     console.log('Configuration:', configuration);

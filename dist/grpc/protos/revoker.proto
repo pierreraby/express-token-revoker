@@ -36,7 +36,23 @@ message GetMetricsRequest {
 }
 
 message GetMetricsResponse {
-  map<string, string> metrics = 1;
+  EstimatedMetrics estimatedMetrics = 1;
+  Configuration configuration = 2;
+}
+
+message EstimatedMetrics {
+  int32 currentCount = 1;
+  int32 previousCount = 2;
+  float currentFpRate = 3;
+  float previousFpRate = 4;
+}
+
+message Configuration {
+  int32 numItems = 1;
+  float fpRate = 2;
+  int32 rotateTime = 3;
+  bool backupEnabled = 4;
+  int32 backupTime = 5;
 }
 
 message ResetAndRestoreRequest {

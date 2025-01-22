@@ -52,10 +52,11 @@ try {
 
   // Exemple d'appel à la méthode getMetrics
   const metricsResponse = await clientAsync.getMetrics({ revokerId: 'JWTrevoker' });
-  const estimatedMetrics = JSON.parse(metricsResponse.metrics.estimatedMetrics);
-  const configuration = JSON.parse(metricsResponse.metrics.configuration);
+  const estimatedMetrics = metricsResponse.estimatedMetrics;
+  const configuration = metricsResponse.configuration;
   console.log('Estimated Metrics:', estimatedMetrics);
   console.log('Configuration:', configuration);
+
 
   // Exemple d'appel à la méthode ResetAndRestore
   const resetRestoreResponse = await clientAsync.resetAndRestore({ revokerId: 'JWTrevoker' });
