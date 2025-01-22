@@ -239,6 +239,9 @@ export class Revoker {
   /** @type {string | undefined} */
   grpcPort;
 
+  /** @type {boolean} */
+  static grpcServerStarted = false;
+
   /**
    * @typedef {Object} ConfigBase
    * @property {number} numItems - Number of items to store in the Bloom filter.
@@ -300,11 +303,11 @@ export class Revoker {
 
     if (this.grpcEnabled) {
       registerRevokerInstance(this);
-      if (!global.grpcServerStarted && this.grpcPort) {
+      if (!Revoker.grpcServerStarted && this.grpcPort) {
         console.log("Starting gRPC server with id: ", this.id);
         console.log("grpcEnabled: ", this.grpcEnabled);
         startServer(this.grpcPort);
-        global.grpcServerStarted = true;
+        Revoker.grpcServerStarted = true;
       }
     }
   }

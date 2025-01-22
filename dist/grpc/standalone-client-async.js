@@ -30,6 +30,7 @@ export function createRevokerClientAsync(serverAddress) {
     resetAndRestore: promisify(client.resetAndRestore).bind(client),
     resetAndClearData: promisify(client.resetAndClearData).bind(client),
     destroy: promisify(client.destroy).bind(client),
+    ListRevokers: promisify(client.ListRevokers).bind(client)
   };
   return promisifiedClient;
 }
@@ -37,6 +38,10 @@ export function createRevokerClientAsync(serverAddress) {
 const clientAsync = createRevokerClientAsync('localhost:50051');
 
 try {
+  // Exemple d'appel à la méthode ListRevokerInstances
+  const listResponse = await clientAsync.ListRevokers({});
+  console.log('List Response:', listResponse);
+
   // Exemple d'appel à la méthode Add
   const addResponse = await clientAsync.add({ revokerId: 'JWTrevoker', filterItem: 'yourFilterItem' });
   console.log('Add Response:', addResponse);
