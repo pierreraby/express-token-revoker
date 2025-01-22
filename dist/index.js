@@ -331,14 +331,18 @@ export class Revoker {
    * @throws {Error} If the item is invalid.
    */
   add(filterItem) {
-    if (this.bloomFilterManager) {
-      try {
-        this.bloomFilterManager.add(filterItem);
-      } catch (error) {
-        throw error;
-      }
-    } else {
+    if (this.grpcEnabled) {
+      throw new Error("gRPC is enabled, use the gRPC method instead");
+    }
+    
+    if (!this.bloomFilterManager) {
       throw new Error("Bloom filter manager not initialized");
+    }
+  
+    try {
+      this.bloomFilterManager.add(filterItem);
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -349,11 +353,15 @@ export class Revoker {
    * @throws {Error} If the Bloom filter manager is not initialized.
    */
   has(item) {
-    if (this.bloomFilterManager) {
-      return this.bloomFilterManager.has(item);
-    } else {
+    if (this.grpcEnabled) {
+      throw new Error("gRPC is enabled, use the gRPC method instead");
+    }
+    
+    if (!this.bloomFilterManager) {
       throw new Error("Bloom filter manager not initialized");
     }
+  
+    return this.bloomFilterManager.has(item);
   }
 
   /**
@@ -362,16 +370,15 @@ export class Revoker {
    * @throws {Error} If the Bloom filter manager is not initialized.
    */
   getMetrics() {
-
-      if (this.bloomFilterManager) {
-        try {
-          return this.bloomFilterManager.getMetrics();
-        } catch (error) {
-          throw error; 
-        }
-      } else {
-        throw new Error("Bloom filter manager not initialized");
-      }
+    if (this.grpcEnabled) {
+      throw new Error("gRPC is enabled, use the gRPC method instead");
+    }
+    
+    if (!this.bloomFilterManager) {
+      throw new Error("Bloom filter manager not initialized");
+    }
+  
+    return this.bloomFilterManager.getMetrics();
   }
 
   /**
@@ -379,11 +386,15 @@ export class Revoker {
    * @returns {Promise<void>}
    */
   async resetAndRestore() {
-    if (this.bloomFilterManager) {
-      await this.bloomFilterManager.resetAndRestore();
-    } else {
+    if (this.grpcEnabled) {
+      throw new Error("gRPC is enabled, use the gRPC method instead");
+    }
+    
+    if (!this.bloomFilterManager) {
       throw new Error("Bloom filter manager not initialized");
     }
+  
+    await this.bloomFilterManager.resetAndRestore();
   }
 
   /**
@@ -391,22 +402,32 @@ export class Revoker {
    * @returns {Promise<void>}
    */
   async resetAndClearData() {
-    if (this.bloomFilterManager) {
-      await this.bloomFilterManager.resetAndClearData();
-    } else {
+    if (this.grpcEnabled) {
+      throw new Error("gRPC is enabled, use the gRPC method instead");
+    }
+    
+    if (!this.bloomFilterManager) {
       throw new Error("Bloom filter manager not initialized");
     }
+  
+    await this.bloomFilterManager.resetAndClearData();
   }
   /**
    * Destroys the Bloom filter manager.
    * @returns {void}
    */
   destroy() {
-    if (this.bloomFilterManager) {
-      this.bloomFilterManager.destroy();
-      this.middleware = null;
-      this.bloomFilterManager = null;
+    if (this.grpcEnabled) {
+      throw new Error("gRPC is enabled, use the gRPC method instead");
     }
+    
+    if (!this.bloomFilterManager) {
+      return;
+    }
+  
+    this.bloomFilterManager.destroy();
+    this.middleware = null;
+    this.bloomFilterManager = null;
   }
 }
 

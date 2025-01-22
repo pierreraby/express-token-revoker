@@ -57,15 +57,19 @@ const revokerService = {
   Add: (call, callback) => {
     const { revokerId, filterItem } = call.request;
     const revokerInstance = revokerInstances.get(revokerId);
-    if (revokerInstance) {
-      try {
-        revokerInstance.add(filterItem);
-        callback(null, { success: true });
-      } catch (error) {
-        callback(null, { success: false, message: error.message });
-      }
-    } else {
-      callback(null, { success: false, message: 'Revoker instance not found' });
+    
+    if (!revokerInstance || !revokerInstance.bloomFilterManager) {
+      return callback(null, { 
+        success: false, 
+        message: 'Revoker instance or Bloom filter not found' 
+      });
+    }
+  
+    try {
+      revokerInstance.bloomFilterManager.add(filterItem);
+      callback(null, { success: true });
+    } catch (error) {
+      callback(null, { success: false, message: error.message });
     }
   },
   /**
@@ -76,15 +80,19 @@ const revokerService = {
   Has: (call, callback) => {
     const { revokerId, item } = call.request;
     const revokerInstance = revokerInstances.get(revokerId);
-    if (revokerInstance && revokerInstance.bloomFilterManager) {
-      try {
-        const exists = revokerInstance.bloomFilterManager.has(item);
-        callback(null, { exists });
-      } catch (error) {
-        callback({ code: grpc.status.INTERNAL, message: error.message });
-      }
-    } else {
-      callback({ code: grpc.status.NOT_FOUND, message: 'Revoker instance or Bloom filter not found' });
+    
+    if (!revokerInstance || !revokerInstance.bloomFilterManager) {
+      return callback({ 
+        code: grpc.status.NOT_FOUND, 
+        message: 'Revoker instance or Bloom filter not found' 
+      });
+    }
+  
+    try {
+      const exists = revokerInstance.bloomFilterManager.has(item);
+      callback(null, { exists });
+    } catch (error) {
+      callback({ code: grpc.status.INTERNAL, message: error.message });
     }
   },
   /**
@@ -95,18 +103,22 @@ const revokerService = {
   GetMetrics: (call, callback) => {
     const { revokerId } = call.request;
     const revokerInstance = revokerInstances.get(revokerId);
-    if (revokerInstance) {
-      try {
-        const metrics = revokerInstance.getMetrics();
-        callback(null, {
-          estimatedMetrics: metrics.estimatedMetrics,
-          configuration: metrics.configuration
-        });
-      } catch (error) {
-        callback({ code: grpc.status.INTERNAL, message: error.message });
-      }
-    } else {
-      callback({ code: grpc.status.NOT_FOUND, message: 'Revoker instance not found' });
+
+    if (!revokerInstance || !revokerInstance.bloomFilterManager) {
+      return callback({ 
+        code: grpc.status.NOT_FOUND, 
+        message: 'Revoker instance or Bloom filter not found' 
+      });
+    }
+
+    try {
+      const metrics = revokerInstance.bloomFilterManager.getMetrics();
+      callback(null, {
+        estimatedMetrics: metrics.estimatedMetrics,
+        configuration: metrics.configuration
+      });
+    } catch (error) {
+      callback({ code: grpc.status.INTERNAL, message: error.message });
     }
   },
   /**
@@ -117,22 +129,26 @@ const revokerService = {
   ResetAndRestore: (call, callback) => {
     const { revokerId } = call.request;
     const revokerInstance = revokerInstances.get(revokerId);
-    if (revokerInstance) {
-      const timeout = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout')), 5000)
-      );
-      
-      Promise.race([
-        revokerInstance.resetAndRestore(),
-        timeout
-      ]).then(() => {
-        callback(null, { success: true });
-      }).catch(error => {
-        callback(null, { success: false, message: error.message });
+
+    if (!revokerInstance || !revokerInstance.bloomFilterManager) {
+      return callback({ 
+        code: grpc.status.NOT_FOUND, 
+        message: 'Revoker instance or Bloom filter not found' 
       });
-    } else {
-      callback(null, { success: false, message: 'Revoker instance not found' });
     }
+
+    const timeout = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Timeout')), 5000)
+    );
+    
+    Promise.race([
+      revokerInstance.bloomFilterManager.resetAndRestore(),
+      timeout
+    ]).then(() => {
+      callback(null, { success: true });
+    }).catch(error => {
+      callback(null, { success: false, message: error.message });
+    });
   },
   /**
    * @param {grpc.ServerUnaryCall<any, any>} call
@@ -142,22 +158,26 @@ const revokerService = {
     ResetAndClearData: (call, callback) => {
     const { revokerId } = call.request;
     const revokerInstance = revokerInstances.get(revokerId);
-    if (revokerInstance) {
-      const timeout = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout')), 5000)
-      );
-      
-      Promise.race([
-        revokerInstance.resetAndClearData(),
-        timeout
-      ]).then(() => {
-        callback(null, { success: true });
-      }).catch(error => {
-        callback(null, { success: false, message: error.message });
+
+    if (!revokerInstance || !revokerInstance.bloomFilterManager) {
+      return callback({ 
+        code: grpc.status.NOT_FOUND, 
+        message: 'Revoker instance or Bloom filter not found' 
       });
-    } else {
-      callback(null, { success: false, message: 'Revoker instance not found' });
     }
+
+    const timeout = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Timeout')), 5000)
+    );
+    
+    Promise.race([
+      revokerInstance.bloomFilterManager.resetAndClearData(),
+      timeout
+    ]).then(() => {
+      callback(null, { success: true });
+    }).catch(error => {
+      callback(null, { success: false, message: error.message });
+    });
   },
   /**
    * @param {grpc.ServerUnaryCall<any, any>} call
@@ -167,12 +187,21 @@ const revokerService = {
   Destroy: (call, callback) => {
     const { revokerId } = call.request;
     const revokerInstance = revokerInstances.get(revokerId);
-    if (revokerInstance) {
-      revokerInstance.destroy();
+
+    if (!revokerInstance || !revokerInstance.bloomFilterManager) {
+      return callback({ 
+        code: grpc.status.NOT_FOUND, 
+        message: 'Revoker instance or Bloom filter not found' 
+      });
+    }
+    try {
+      revokerInstance.bloomFilterManager.destroy();
+      revokerInstance.bloomFilterManager = null;
+      revokerInstance.middleware = null;
       unregisterRevokerInstance(revokerId);
       callback(null, { success: true });
-    } else {
-      callback(null, { success: false, message: 'Revoker instance not found' });
+    } catch (error) {
+      callback({ code: grpc.status.INTERNAL, message: error.message });
     }
   },
   /**
