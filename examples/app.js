@@ -29,7 +29,7 @@ app.post('/revoke/:claim/:value', admin, JWTfilter, async (req, res) => {
     JWTrevoker.add(filterItem);
     res.status(200).json({ message: 'Token revoked' });
   } catch(error) {
-    res.status(500).json({ message: `Error: ${ error }` });
+    res.status(500).json({ message: `Error: ${ error.message }` });
   }
 });
 
@@ -45,7 +45,7 @@ app.post('/revoke2/:token', admin, JWTfilter, async (req, res) => {
     opaqueRevoker.add(token);
     res.status(200).json({ message: 'Token revoked' });
   } catch(error) {
-    res.status(500).json({ message: `Error: ${ error }` });
+    res.status(500).json({ message: `Error: ${ error.message }` });
   }
 });
 
@@ -61,7 +61,7 @@ app.post('/revoke3/:token', admin, JWTfilter, (req, res) => {
     opaqueRevokerCustom.add(token);
     res.status(200).json({ message: 'Token revoked' });
   } catch(error) {
-    res.status(500).json({ message: `Error: ${ error }` });
+    res.status(500).json({ message: `Error: ${ error.message }` });
   }
 });
 
@@ -73,7 +73,7 @@ app.post('/restore', admin, (req, res) => {
     opaqueRevokerCustom.restore();
     res.status(200).json({ message: 'Bloom filters restored' });
   } catch(error) {
-    res.status(500).json({ message: `Error: ${ error }` });
+    res.status(500).json({ message: `Error: ${ error.message }` });
   }
 });
 
@@ -85,7 +85,7 @@ app.post('/reset', admin, (req, res) => {
     opaqueRevokerCustom.reset();
     res.status(200).json({ message: 'Bloom filters reset' });
   } catch(error) {
-    res.status(500).json({ message: `Error: ${ error }` });
+    res.status(500).json({ message: `Error: ${ error.message }` });
   }
 });
 
@@ -95,7 +95,7 @@ app.get('/metrics', (req, res) => {
     const metrics  =  JWTrevoker.getMetrics();
     res.status(200).json(metrics);
   } catch(error) {
-    res.status(500).json({ message: `Error: ${ error }` });
+    res.status(500).json({ message: `Error: ${ error.message }` });
   }
 });
 
