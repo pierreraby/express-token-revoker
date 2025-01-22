@@ -233,6 +233,9 @@ export class Revoker {
   /** @type {string} */
   id;
 
+  /** @type {GenericLogger} */
+  logger;
+
   /** @type {boolean} */
   grpcEnabled;
 
@@ -278,6 +281,7 @@ export class Revoker {
     this.throttleLog = throttle((message) => logger.info(message), 60000);
 
     this.id = id;
+    this.logger = logger;
 
     if (claimsToCheck) {
       this.middleware = createJWTMiddleware(
