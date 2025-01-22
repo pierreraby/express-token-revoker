@@ -27,7 +27,7 @@
 
 import { BloomFilterManager } from "./Bloom-filter-manager.js";
 import throttle from "throttleit";
-import { registerRevokerInstance, startServer } from "./grpc/standalone-server.js";
+import { registerRevokerInstance, startServer } from "./grpc/std-server.js";
 
 /**
    * Logs or throttles messages based on the environment.
