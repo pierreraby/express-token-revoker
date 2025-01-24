@@ -1,6 +1,7 @@
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import path from 'path';
+import { exit } from 'process';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -32,6 +33,8 @@ export function createRevokerClient(serverAddress) {
 // Exemple d'utilisation du client
 const client = createRevokerClient('localhost:50051');
 
+
+
 // Exemple d'appel à la méthode ListRevokers
 client.ListRevokers({}, (err, response) => {
   if (err) {
@@ -43,12 +46,15 @@ client.ListRevokers({}, (err, response) => {
 
 // Exemple d'appel à la méthode Add
 client.Add({ revokerId: 'JWTrevoker', filterItem: 'yourFilterItem' }, (err, response) => {
+  console.log('Add Response:', response);
   if (err) {
     console.error('Error:', err);
   } else {
     console.log('Add Response:', response);
   }
 });
+
+
 
 // Exemple d'appel à la méthode Has
 client.Has({ revokerId: 'JWTrevoker', item: 'yourFilterItem' }, (err, response) => {

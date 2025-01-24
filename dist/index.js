@@ -308,9 +308,9 @@ export class Revoker {
     if (this.grpcEnabled) {
       registerRevokerInstance(this);
       if (!Revoker.grpcServerStarted && this.grpcPort) {
-        console.log("Starting gRPC server with id: ", this.id);
-        console.log("grpcEnabled: ", this.grpcEnabled);
-        startServer(this.grpcPort);
+        this.logger.info(`Starting gRPC server with id:  ${this.id}`);
+        this.logger.info(`grpcEnabled: ${this.grpcEnabled}`);
+        startServer(this.grpcPort, this.logger);
         Revoker.grpcServerStarted = true;
       }
     }
@@ -421,17 +421,13 @@ export class Revoker {
    * @returns {void}
    */
   destroy() {
-    if (this.grpcEnabled) {
-      throw new Error("gRPC is enabled, use the gRPC method instead");
+    if (this.bloomFilterManager) {
+      this.bloomFilterManager.destroy();
+      this.middleware = null;
+      this.bloomFilterManager = null;
+    } else {
+      this.logger.warn("Bloom filter manager already destroyed");
     }
-    
-    if (!this.bloomFilterManager) {
-      return;
-    }
-  
-    this.bloomFilterManager.destroy();
-    this.middleware = null;
-    this.bloomFilterManager = null;
   }
 }
 

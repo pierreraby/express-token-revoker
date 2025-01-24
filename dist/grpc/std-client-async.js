@@ -1,6 +1,7 @@
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import path from 'path';
+import { exit } from 'process';
 import { fileURLToPath } from 'url';
 import { promisify } from 'util';
 
@@ -38,41 +39,40 @@ export function createRevokerClientAsync(serverAddress) {
 const clientAsync = createRevokerClientAsync('localhost:50051');
 
 try {
-  // Exemple d'appel à la méthode ListRevokerInstances
+  // Example of calling the ListRevokers method
   const listResponse = await clientAsync.ListRevokers({});
   console.log('List Response:', listResponse);
 
-  // Exemple d'appel à la méthode Add
-  const addResponse = await clientAsync.add({ revokerId: 'JWTrevoker', filterItem: 'yourFilterItem' });
+  // Example of calling the Add method
+  const addResponse = await clientAsync.add({ revokerId: 'JWTrevoker', item: 'yourFilterItem' });
   console.log('Add Response:', addResponse);
 
-  // Exemple d'appel à la méthode Has
+  // Example of calling the Has method
   const hasResponse1 = await clientAsync.has({ revokerId: 'JWTrevoker', item: 'yourFilterItem' });
   console.log('Has Response (1):', hasResponse1);
 
-  // Exemple d'appel à la méthode getMetrics
+  // Example of calling the getMetrics method
   const metricsResponse = await clientAsync.getMetrics({ revokerId: 'JWTrevoker' });
   const estimatedMetrics = metricsResponse.estimatedMetrics;
   const configuration = metricsResponse.configuration;
   console.log('Estimated Metrics:', estimatedMetrics);
   console.log('Configuration:', configuration);
 
-
-  // Exemple d'appel à la méthode ResetAndRestore
+  // Example of calling the ResetAndRestore method
   const resetRestoreResponse = await clientAsync.resetAndRestore({ revokerId: 'JWTrevoker' });
   console.log('ResetAndRestore Response:', resetRestoreResponse);
 
   const hasResponse2 = await clientAsync.has({ revokerId: 'JWTrevoker', item: 'yourFilterItem' });
   console.log('Has Response (2):', hasResponse2);
 
-  // Exemple d'appel à la méthode ResetAndClearData
+  // Example of calling the ResetAndClearData method
   const resetClearDataResponse = await clientAsync.resetAndClearData({ revokerId: 'JWTrevoker' });
   console.log('ResetAndClearData Response:', resetClearDataResponse);
 
   const hasResponse3 = await clientAsync.has({ revokerId: 'JWTrevoker', item: 'yourFilterItem' });
   console.log('Has Response (3):', hasResponse3);
 
-  // Exemple d'appel à la méthode Destroy
+  // Example of calling the Destroy method
   const destroyResponse = await clientAsync.destroy({ revokerId: 'JWTrevoker' });
   console.log('Destroy Response:', destroyResponse);
 
