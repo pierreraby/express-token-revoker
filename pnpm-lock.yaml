@@ -29,9 +29,6 @@ importers:
       pino-pretty:
         specifier: ^13.0.0
         version: 13.0.0
-      protoc-gen-grpc-js:
-        specifier: ^0.4.0
-        version: 0.4.0(google-protobuf@3.21.4)
       throttleit:
         specifier: ^2.1.0
         version: 2.1.0
@@ -647,10 +644,6 @@ packages:
   get-source@2.0.12:
     resolution: {integrity: sha512-X5+4+iD+HoSeEED+uwrQ07BOQr0kEDFMVqqpBuI+RaZBpBpHCuXxo70bjar6f0b0u/DQJsJ7ssurpP0V60Az+w==}
 
-  get-stdin@8.0.0:
-    resolution: {integrity: sha512-sY22aA6xchAzprjyqmSEQv4UbAAzRN0L2dQB0NlN5acTTK9Don6nhoc3eAbUnpZiCANAMfd/+40kVdKfFygohg==}
-    engines: {node: '>=10'}
-
   getopts@2.3.0:
     resolution: {integrity: sha512-5eDf9fuSXwxBL6q5HX+dhDj+dslFGWzU5thZ9kNKUkcPtaPdatmUFKwHFrLb/uf/WpA4BHET+AX3Scl56cAjpA==}
 
@@ -661,9 +654,6 @@ packages:
   glob@10.4.5:
     resolution: {integrity: sha512-7Bv8RF0k6xjo7d4A/PxYLbUCfb6c+Vpd2/mB2yRDlew7Jb5hEXiCD9ibfO7wpk8i4sevK6DFny9h7EYbM3/sHg==}
     hasBin: true
-
-  google-protobuf@3.21.4:
-    resolution: {integrity: sha512-MnG7N936zcKTco4Jd2PX2U96Kf9PxygAPKBug+74LHzmHXmceN16MmRcdgZv+DGef/S9YvQAfRsNCn4cjf9yyQ==}
 
   gopd@1.2.0:
     resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
@@ -1047,13 +1037,6 @@ packages:
   protobufjs@7.4.0:
     resolution: {integrity: sha512-mRUWCc3KUU4w1jU8sGxICXH/gNS94DvI1gxqDvBzhj1JpcsimQkYiOJfwsPUykUI5ZaspFbSgmBLER8IrQ3tqw==}
     engines: {node: '>=12.0.0'}
-
-  protoc-gen-grpc-js@0.4.0:
-    resolution: {integrity: sha512-GhDAGTdY33+UgfyVNsEHC1yVil81sZO2e8uG49ZsB2Mg/uWwhwgrrMR5TLB4aP737NcqNldRmwMYg92stmmcdg==}
-    engines: {node: '>=10'}
-    hasBin: true
-    peerDependencies:
-      google-protobuf: ^3.14.0
 
   proxy-addr@2.0.7:
     resolution: {integrity: sha512-llQsMLSUDUPT44jdrU/O37qlnifitDP+ZwrmmZcoSKyLKvtZxpyV0n2/bD/N4tBAAZ/gJEdZU7KMraoK1+XYAg==}
@@ -2035,8 +2018,6 @@ snapshots:
       data-uri-to-buffer: 2.0.2
       source-map: 0.6.1
 
-  get-stdin@8.0.0: {}
-
   getopts@2.3.0: {}
 
   glob-parent@5.1.2:
@@ -2051,8 +2032,6 @@ snapshots:
       minipass: 7.1.2
       package-json-from-dist: 1.0.1
       path-scurry: 1.11.1
-
-  google-protobuf@3.21.4: {}
 
   gopd@1.2.0: {}
 
@@ -2435,12 +2414,6 @@ snapshots:
       '@protobufjs/utf8': 1.1.0
       '@types/node': 22.10.7
       long: 5.2.4
-
-  protoc-gen-grpc-js@0.4.0(google-protobuf@3.21.4):
-    dependencies:
-      get-stdin: 8.0.0
-      google-protobuf: 3.21.4
-      tslib: 2.8.1
 
   proxy-addr@2.0.7:
     dependencies:

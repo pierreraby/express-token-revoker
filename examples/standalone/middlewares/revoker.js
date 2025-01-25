@@ -1,7 +1,7 @@
 
 // @ts-check 
-import { Revoker } from '../../dist/index.js';
-import logger from '../logger.js';
+import { Revoker } from '#dist/index.js';
+import logger from '#logger';
 
 const JWTconfig = { // this config uses ~21MB of memory
   numItems: 1000000, // 1 million items
@@ -10,6 +10,7 @@ const JWTconfig = { // this config uses ~21MB of memory
   rotateTime: 10 * 60000, // 10 minutes
   claimsToCheck: ["jti", "fam", "sub"], // adding claims to check, return a JWT check middleware
   id: "JWTrevoker", // revoker id
+  mode: "standalone", // standalone mode
   logger,
   grpcEnabled: true,
   grpcPort: "50051",
@@ -25,6 +26,7 @@ const opaqueConfig = {
   fpRate: 0.000001,
   rotateTime: 30 * 60000, // 30 minutes
   id: "opaqueRevoker",
+  mode: "standalone", // standalone mode
   opaqueHeader: "Authorization", // adding header where to check opaque token, maybe 'X-Auth-Token', etc
   logger,
   backup: true,
@@ -39,6 +41,8 @@ const opaqueConfigCustom = { // this config uses ~30MB of memory
   fpRate: 0.000000001, // one in a billion
   rotateTime: 30 * 60000, // 30 minutes
   id: "opaqueRevokerCustom",
+  /** @type {'standalone' | 'distributed' | 'cluster'} */
+  mode: "standalone", // standalone mode
   opaqueHeader: "X-Auth-Token", // adding header where to check opaque token. (x-auth-api, etc)
   logger,
   backup: true,

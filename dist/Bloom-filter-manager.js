@@ -145,6 +145,10 @@ export class BloomFilterManager {
       logger.error('rotateTime must be a positive integer.');
       throw new Error('rotateTime must be a positive integer.');
     }
+    if (!id || typeof id !== 'string') {
+      logger.error('id must be a string.');
+      throw new Error('id must be a string.');
+    }
 
     if (backup && typeof backup !== 'boolean') {
       logger.error('backup must be a boolean.');
@@ -168,9 +172,8 @@ export class BloomFilterManager {
       throw new Error('logger must have methods info, warn, debug, and error.');
     }
 
-
+    /** @private */
     this.id = id;
-
     /** @private */
     this.numItems = numItems;
     /** @private */
