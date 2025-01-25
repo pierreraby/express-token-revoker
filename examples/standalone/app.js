@@ -1,6 +1,6 @@
 /* @ts-check */
 import express from 'express';
-import logger from './logger.js';
+// import logger from '../logger.js';
 import { auth, admin } from './middlewares/auth.js';
 import {JWTrevoker, JWTfilter, opaqueRevoker, opaqueFilter,
         opaqueRevokerCustom, opaqueFilterCustom} from './middlewares/revoker.js';

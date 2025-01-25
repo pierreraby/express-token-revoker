@@ -1,6 +1,6 @@
 // Desc: Middleware to check if the user is authenticated
 import jwt from "jsonwebtoken";
-import logger from "../logger.js";
+import logger from "#logger";
 
 // Verify the JWT token
 export const auth = (req, res, next) => {

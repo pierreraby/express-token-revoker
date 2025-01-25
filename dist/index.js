@@ -233,6 +233,9 @@ export class Revoker {
   /** @type {string} */
   id;
 
+  /** @type {'standalone' | 'distributed' | 'cluster'} */
+  mode;
+
   /** @type {GenericLogger} */
   logger;
 
@@ -291,12 +294,12 @@ export class Revoker {
         this.throttleLog,
       );
     } else if (opaqueHeader) {
-      this.middleware = createOpaqueMiddleware(
-        opaqueHeader,
-        this.bloomFilterManager,
-        logger,
-        this.throttleLog,
-      );
+        this.middleware = createOpaqueMiddleware(
+          opaqueHeader,
+          this.bloomFilterManager,
+          logger,
+          this.throttleLog,
+        );
     } else {
       this.bloomFilterManager.destroy();
       throw new Error("claimsToCheck or opaqueHeader must be provided");
