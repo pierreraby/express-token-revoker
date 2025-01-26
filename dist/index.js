@@ -10,7 +10,7 @@
  */
 
 /**
- * @typedef {Object} JWTToken
+ * @typedef {Object} JWTPayload
  * @property {string} [iss] - Issuer claim.
  * @property {string} [sub] - Subject claim.
  * @property {string} [aud] - Audience claim.
@@ -21,9 +21,9 @@
  * @property {any} [anyOtherClaim] - Allows adding additional claims.
  */
 
-/**
- * @typedef {import('express').Request & { token?: JWTToken }} RequestWithToken
- */
+// /**
+//  * @typedef {import('express').Request & { token?: JWTToken }} RequestWithToken
+//  */
 
 import { BloomFilterManager } from "./Bloom-filter-manager.js";
 import throttle from "throttleit";
@@ -48,42 +48,42 @@ const logOrThrottle = (message, throttleFn, logger, isError = false) => {
 /**
  * Middleware factory to check claims with the Bloom filter.
  * @param {string[]} claimsToCheck - List of claims to check.
+ * @param {string} payloadKey - The key to get the token payload from the request.
  * @param {BloomFilterManager} bloomFilterManager - Instance of the Bloom filter manager.
- * @param {GenericLogger} logger - Any logger implementing the basic logging methods
  * @param {GenericLogger} logger - Any logger implementing the basic logging methods
  * @param {Function} throttleJWT - Throttle function.
  * @returns {import('express').RequestHandler} Middleware Express.
  */
-const createJWTMiddleware = (claimsToCheck, bloomFilterManager, logger, throttleJWT) => {
+const createJWTMiddleware = (claimsToCheck, payloadKey, bloomFilterManager, logger, throttleJWT) => {
 
   /**
-   * Validates the presence of the token.
-   * @param {JWTToken | undefined} token - The JWT token to validate.
-   * @returns {token is JWTToken} - True if token is valid, throws otherwise
-   * @throws {Error} If the token is missing.
+   * Validates the presence of the JWT payload.
+   * @param {JWTPayload | undefined} payload - The JWT payload to validate.
+   * @returns {payload is JWTPayload} - True if token is valid, throws otherwise
+   * @throws {Error} If the payload is missing.
    */
-  const validateToken = (token) => {
-    if (!token) {
-      logger.info("Missing jwt token");
+  const validatePayload = (payload) => {
+    if (!payload) {
+      logger.info("Missing JWT payload in request");
       return false;
     }
     return true;
   };
 
   /**
-   * Validates a specific claim in the JWT token.
-   * @param {JWTToken} token - The JWT token to validate.
+   * Validates a specific claim in the JWT payload.
+   * @param {JWTPayload} payload - The JWT payload to validate.
    * @param {string} claim - The claim to validate.
    * @throws {Error} If the claim is missing or blacklisted.
    */
-  const validateClaim = (token, claim) => {
-    if (!token[claim]) {
-      logger.info(`Missing ${claim} claim in JWT token`);
+  const validateClaim = (payload, claim) => {
+    if (!payload[claim]) {
+      logger.info(`Missing ${claim} claim in JWT Payload`);
       return false;
     }
 
-    if (bloomFilterManager.has(`${claim}-${token[claim]}`)) {
-      logOrThrottle(`Token ${claim}-${token[claim]} is blacklisted`, throttleJWT, logger, false);
+    if (bloomFilterManager.has(`${claim}-${payload[claim]}`)) {
+      logOrThrottle(`Token ${claim}-${payload[claim]} is blacklisted`, throttleJWT, logger, false);
       return false;
     }
     return true;
@@ -91,11 +91,11 @@ const createJWTMiddleware = (claimsToCheck, bloomFilterManager, logger, throttle
 
   /**
    * Validates all specified claims in the JWT token.
-   * @param {JWTToken} token - The JWT token to validate.
+   * @param {JWTPayload} payload - The JWT payload to validate.
    * @param {string[]} claims - The claims to validate.
    */
-  const validateAllClaims = (token, claims) => {
-    return claims.every(claim => validateClaim(token, claim));
+  const validateAllClaims = (payload, claims) => {
+    return claims.every(claim => validateClaim(payload, claim));
   };
 
   /**
@@ -106,10 +106,9 @@ const createJWTMiddleware = (claimsToCheck, bloomFilterManager, logger, throttle
    */
   return (req, res, next) => {
     try {
-      /** @type {RequestWithToken} */
-      const reqWithToken = req;
+      const decodedPayload = req[payloadKey];
 
-      if (validateToken(reqWithToken.token) && validateAllClaims(reqWithToken.token, claimsToCheck)) {
+      if (validatePayload(decodedPayload) && validateAllClaims(decodedPayload, claimsToCheck)) {
         next();
       } else {
         res.status(401).json({
@@ -250,17 +249,18 @@ export class Revoker {
 
   /**
    * @typedef {Object} ConfigBase
+
+   * @property {string} id - The ID of the Revoker instance.
    * @property {number} numItems - Number of items to store in the Bloom filter.
    * @property {number} fpRate - Target false positive rate for the Bloom filter.
    * @property {number} rotateTime - Rotation interval in milliseconds.
-   * @property {string} id - The ID of the Revoker instance.
    * @property {boolean} [backup] - whether to enable backup.
    * @property {number} [backupTime] - Backup interval in milliseconds.
-   * @property {GenericLogger} logger - Any logger implementing the basic logging methods
    * @property {boolean} [grpcEnabled] - Whether to enable gRPC.
    * @property {string} [grpcPort] - The port for the gRPC server.
-   * @typedef {ConfigBase & { claimsToCheck: Array<string>, opaqueHeader?: never }} JWTConfig
-   * @typedef {ConfigBase & { opaqueHeader: string, claimsToCheck?: never }} OpaqueConfig
+   * @property {GenericLogger} logger - Any logger implementing the basic logging methods
+   * @typedef {ConfigBase & { claimsToCheck: Array<string>, payloadKey: string, opaqueHeader?: never }} JWTConfig
+   * @typedef {ConfigBase & { opaqueHeader: string, claimsToCheck?: never, payloadKey?: never }} OpaqueConfig
    * @typedef {JWTConfig | OpaqueConfig} Config
    */
 
@@ -269,7 +269,45 @@ export class Revoker {
    * @throws {Error} If neither `claimsToCheck` nor `opaqueHeader` is provided.
    */
   constructor(config) {
-    const { numItems, fpRate, rotateTime, id, claimsToCheck, opaqueHeader, backup, backupTime, logger = console, grpcEnabled = false, grpcPort  } = config;
+    const {
+      id, claimsToCheck, payloadKey, opaqueHeader, numItems, fpRate, rotateTime,
+      backup, backupTime, grpcEnabled = false, grpcPort, logger = console
+    } = config;
+
+    /*** Validate the revoker configuration ***/
+    if (!id || typeof id !== 'string') {
+      logger.error('id must be a string.');
+      throw new Error('id must be a string.');
+    }
+
+    if (claimsToCheck && opaqueHeader) {
+      logger.error("claimsToCheck and opaqueHeader cannot be provided at the same time");
+      throw new Error("claimsToCheck and opaqueHeader cannot be provided at the same time");
+    }
+
+    if(claimsToCheck && !Array.isArray(claimsToCheck)) {
+      logger.error('claimsToCheck must be an array.');
+      throw new Error('claimsToCheck must be an array.');
+    }
+
+    if(claimsToCheck && claimsToCheck.length === 0) {
+      logger.error('claimsToCheck must have at least one claim.');
+      throw new Error('claimsToCheck must have at least one claim.');
+    }
+
+    if (claimsToCheck) {
+      for (const claim of claimsToCheck) {
+        if (typeof claim !== 'string') {
+          logger.error('claimsToCheck must be an array of strings.');
+          throw new Error('claimsToCheck must be an array of strings.');
+        }
+      }
+    }
+
+    if (opaqueHeader && typeof opaqueHeader !== 'string') {
+      logger.error('opaqueHeader must be a string.');
+      throw new Error('opaqueHeader must be a string.');
+    }    
 
     this.bloomFilterManager = new BloomFilterManager({
       numItems,
@@ -289,9 +327,10 @@ export class Revoker {
     if (claimsToCheck) {
       this.middleware = createJWTMiddleware(
         claimsToCheck,
+        payloadKey,
         this.bloomFilterManager,
         logger,
-        this.throttleLog,
+        this.throttleLog
       );
     } else if (opaqueHeader) {
         this.middleware = createOpaqueMiddleware(
