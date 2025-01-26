@@ -9,11 +9,11 @@ const JWTconfig = { // this config uses ~21MB of memory
   //rotateTime: 1800000, // 30 minutes
   rotateTime: 10 * 60000, // 10 minutes
   claimsToCheck: ["jti", "fam", "sub"], // adding claims to check, return a JWT check middleware
-  id: "JWTrevoker", // revoker id
-  mode: "standalone", // standalone mode
+  payloadKey: "token", // key to get token payload from request
+  id: "JWTrevoker", // revoker an filter id
   logger,
-  grpcEnabled: true,
-  grpcPort: "50051",
+  // grpcEnabled: true,
+  // grpcPort: "50051",
   backup: true,
   backupTime: 5 * 60000, // 5 minute
 };
@@ -26,7 +26,6 @@ const opaqueConfig = {
   fpRate: 0.000001,
   rotateTime: 30 * 60000, // 30 minutes
   id: "opaqueRevoker",
-  mode: "standalone", // standalone mode
   opaqueHeader: "Authorization", // adding header where to check opaque token, maybe 'X-Auth-Token', etc
   logger,
   backup: true,
@@ -41,8 +40,6 @@ const opaqueConfigCustom = { // this config uses ~30MB of memory
   fpRate: 0.000000001, // one in a billion
   rotateTime: 30 * 60000, // 30 minutes
   id: "opaqueRevokerCustom",
-  /** @type {'standalone' | 'distributed' | 'cluster'} */
-  mode: "standalone", // standalone mode
   opaqueHeader: "X-Auth-Token", // adding header where to check opaque token. (x-auth-api, etc)
   logger,
   backup: true,
