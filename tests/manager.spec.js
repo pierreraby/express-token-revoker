@@ -2,8 +2,6 @@ import { test } from '@japa/runner'
 import sinon from 'sinon'
 import fs from 'fs'
 import { BloomFilterManager } from '../dist/Bloom-filter-manager.js'
-import { group, log } from 'console'
-import exp from 'constants'
 
 
 test.group('BloomFilterManager Constructor Validation', (group) => {
@@ -12,10 +10,10 @@ test.group('BloomFilterManager Constructor Validation', (group) => {
 
   group.each.setup(() => {
     logger = {
-          info: sinon.spy(),
-          warn: sinon.spy(),
-          debug: sinon.spy(),
-          error: sinon.spy()
+      info: sinon.spy(),
+      warn: sinon.spy(),
+      debug: sinon.spy(),
+      error: sinon.spy(),
     }
   })
 
@@ -26,133 +24,169 @@ test.group('BloomFilterManager Constructor Validation', (group) => {
 
   test('constructor throws error when numItems is not provided', ({ expect }) => {
     expect(() => new BloomFilterManager({
+      id: 'test',
       fpRate: 0.01,
       rotateTime: 1000,
       logger
-    })).toThrow('numItems must be a positive integer.')
+    })).toThrow('Invalid input: \"numItems\" is required')
   })
 
   test('constructor throws error when numItems is not an integer', ({ expect }) => {
     expect(() => new BloomFilterManager({
+      id: 'test',
       numItems: 1000.5,
       fpRate: 0.01,
       rotateTime: 1000,
       logger
-    })).toThrow('numItems must be a positive integer.')
+    })).toThrow('Invalid input: \"numItems\" must be an integer')
   })
 
   test('constructor throws error for invalid numItems', ({expect}) => {
     expect(() => new BloomFilterManager({
+      id: 'test',
       numItems: -1,
       fpRate: 0.01,
       rotateTime: 1000,
       logger
-    })).toThrow('numItems must be a positive integer.')
+    })).toThrow('Invalid input: \"numItems\" must be a positive number')
   })
 
   test('constructor throws error when fpRate is not provided', ({ expect }) => {
     expect(() => new BloomFilterManager({
+      id: 'test',
       numItems: 1000,
       rotateTime: 1000,
       logger
-    })).toThrow('fpRate must be a number between 0 and 1 (exclusive).')
+    })).toThrow('Invalid input: \"fpRate\" is required')
   })
-  test('constructor throws error for invalid fpRate', ({expect}) => {
+  test('constructor throws error for invalid fpRate > 1', ({expect}) => {
     expect(() => new BloomFilterManager({
+      id: 'test',
       numItems: 1000,
       fpRate: 1.5,
       rotateTime: 1000,
       logger
-    })).toThrow('fpRate must be a number between 0 and 1 (exclusive).')
+    })).toThrow('Invalid input: \"fpRate\" must be less than or equal to 1')
+  })
+
+  test('constructor throws error for invalid fpRate < 0', ({expect}) => {
+    expect(() => new BloomFilterManager({
+      id: 'test',
+      numItems: 1000,
+      fpRate: -0.5,
+      rotateTime: 1000,
+      logger
+    })).toThrow('Invalid input: \"fpRate\" must be a positive number')
   })
 
   test('constructor throws error when rotateTime is not provided', ({ expect }) => {
     expect(() => new BloomFilterManager({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.01,
       logger
-    })).toThrow('rotateTime must be a positive integer.')
+    })).toThrow('Invalid input: \"rotateTime\" is required')
   })
 
   test('constructor throws error when rotateTime is not an integer', ({ expect }) => {
     expect(() => new BloomFilterManager({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000.5,
       logger
-    })).toThrow('rotateTime must be a positive integer.')
+    })).toThrow('Invalid input: \"rotateTime\" must be an integer')
   })
 
   test('constructor throws error for invalid rotateTime', ({expect}) => {
     expect(() => new BloomFilterManager({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 0,
       logger
-    })).toThrow('rotateTime must be a positive integer.')
+    })).toThrow('Invalid input: \"rotateTime\" must be a positive number')
   })
 
   test('constructor throws error when backup is not a boolean', ({ expect }) => {
     expect(() => new BloomFilterManager({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
       backup: 'true',
       logger
-    })).toThrow('backup must be a boolean.')
+    })).toThrow('Invalid input: \"backup\" must be a boolean')
   })
+
+  test('constructor throws error when backupTime is provided and backup is not provided', ({ expect }) => {
+    expect(() => new BloomFilterManager({
+      id: 'test',
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 1000,
+      backup: false,
+      backupTime: 500,
+      logger
+    })).toThrow('Invalid input: \"backupTime\" is not allowed')
+  })
+
 
   test('constructor throws error when backupTime is not a positive integer', ({ expect }) => {
     expect(() => new BloomFilterManager({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
       backup: true,
       backupTime: -1000,
       logger
-    })).toThrow('backupTime must be a positive integer.')
+    })).toThrow('Invalid input: \"backupTime\" must be a positive number')
   })
 
   test('constructor throws error when backupTime is not an integer', ({ expect }) => {
     expect(() => new BloomFilterManager({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
       backup: true,
       backupTime: 1000.5,
       logger
-    })).toThrow('backupTime must be a positive integer.')
+    })).toThrow('Invalid input: \"backupTime\" must be an integer')
   })
 
   test('constructor throws error for backupTime superior to rotateTime', ({expect}) => {
     expect(() => new BloomFilterManager({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
       backup: true,
       backupTime: 2000,
       logger
-    })).toThrow('backupTime must be less than rotateTime.')
+    })).toThrow('Invalid input: \"backupTime\" must be less than ref:rotateTime')
   })
 
   test('constructor throws error if logger is not an object', ({expect}) => {
     expect(() => new BloomFilterManager({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
       logger: 'console'
-    })).toThrow('logger must be an object.')
+    })).toThrow('Invalid input: \"logger\" must be of type object')
   });
 
   test('constructor throws error if logger is not an object with required methods', ({expect}) => {
     expect(() => new BloomFilterManager({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
-      logger: { info: sinon.spy(), warn: sinon.spy() }
-    })).toThrow('logger must have methods info, warn, debug, and error.')
+      logger: { info: sinon.spy(), warn: sinon.spy() } // missing required methods
+    })).toThrow('Invalid input: \"logger.error\" is required')
   });
-
 })
 
 test.group('BloomFilterManager Add and Has', (group) => {
@@ -164,9 +198,10 @@ test.group('BloomFilterManager Add and Has', (group) => {
         info: sinon.spy(),
         warn: sinon.spy(),
         debug: sinon.spy(),
-        error: sinon.spy()
+        error: sinon.spy(),
     }
     manager = new BloomFilterManager({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.0001,
       rotateTime: 2000, // Temps de rotation court pour les tests
@@ -245,10 +280,11 @@ test.group('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', 
         info: sinon.spy(),
         warn: sinon.spy(),
         debug: sinon.spy(),
-        error: sinon.spy()
+        error: sinon.spy(),
     }
 
     manager = new BloomFilterManager({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.0001,
       rotateTime: 1000,
@@ -274,8 +310,8 @@ test.group('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', 
   test('resetAndRestore resets timers and restore intervall', async ({ expect }) => {
     manager.add('testValue')
     await manager.resetAndRestore()
-    expect(logger.debug.calledWith('Bloom filter rotation stopped. Interval is now: null')).toBe(true)
-    expect(logger.debug.calledWith('Bloom filter backup stopped. Interval is now: null')).toBe(true)
+    expect(logger.debug.calledWith(`Rotation stopped for id: ${manager.id}`)).toBe(true)
+    expect(logger.debug.calledWith(`Rotation stopped for id: ${manager.id}`)).toBe(true)
     expect(manager.rotationInterval).not.toBe(null)
     expect(manager.backupInterval).not.toBe(null)
     await manager.resetAndClearData()
@@ -285,8 +321,10 @@ test.group('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', 
     sinon.resetHistory()
     manager.add('testValue')
     await manager.resetAndRestore()
+    console.log(logger.debug.args)
+    console.log(manager.id)
     expect(logger.debug.calledWith('Bloom filters reset')).toBe(true)
-    expect(logger.debug.calledWith(`Elements restored from temp file for instance : id ${manager.instanceId}`)).toBe(true)
+    expect(logger.debug.calledWith(`Elements restored from temp file for instance : ${manager.id}`)).toBe(true)
     expect(manager.has('testValue')).toBe(true)
     expect(manager.current).not.toBe(null)
     expect(manager.previous).toBe(null)
@@ -299,16 +337,16 @@ test.group('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', 
 
     await new Promise(resolve => setTimeout(resolve, 600)) // await backup
 
-    expect(logger.debug.calledWith(`Saved current filter : id ${manager.instanceId}`)).toBe(true)
-    expect(logger.debug.calledWith(`Temp file cleared for instance ${manager.instanceId}`)).toBe(true)
+    expect(logger.debug.calledWith(`Saved current filter : id ${manager.id}`)).toBe(true)
+    expect(logger.debug.calledWith(`Temp file cleared for instance ${manager.id}`)).toBe(true)
     expect(logger.debug.calledWith('No previous filter to backup before first rotation')).toBe(true)
     manager.add('testValue2')
 
     await manager.resetAndRestore()
 
     expect(logger.debug.calledWith('Bloom filters reset')).toBe(true)
-    expect(logger.debug.calledWith(`Restored current filter : id ${manager.instanceId}`)).toBe(true)
-    expect(logger.debug.calledWith(`Elements restored from temp file for instance : id ${manager.instanceId}`)).toBe(true)
+    expect(logger.debug.calledWith(`Restored current filter : id ${manager.id}`)).toBe(true)
+    expect(logger.debug.calledWith(`Elements restored from temp file for instance : ${manager.id}`)).toBe(true)
     expect(manager.has('testValue')).toBe(true)
     expect(manager.has('testValue2')).toBe(true)
     await manager.resetAndClearData()
@@ -317,8 +355,8 @@ test.group('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', 
   test('resetAndRestore reset filters and restore backup files after backup and rotation', async ({ expect }) => {
     manager.add('testValue')
     await new Promise(resolve => setTimeout(resolve, 600)) // await backup
-    expect(logger.debug.calledWith(`Saved current filter : id ${manager.instanceId}`)).toBe(true)
-    expect(logger.debug.calledWith(`Temp file cleared for instance ${manager.instanceId}`)).toBe(true)
+    expect(logger.debug.calledWith(`Saved current filter : id ${manager.id}`)).toBe(true)
+    expect(logger.debug.calledWith(`Temp file cleared for instance ${manager.id}`)).toBe(true)
     expect(logger.debug.calledWith('No previous filter to backup before first rotation')).toBe(true)
     manager.add('testValue2')
     await new Promise(resolve => setTimeout(resolve, 600)) // await rotation
@@ -341,8 +379,8 @@ test.group('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', 
   test('resetAndClearData resets filters and deletes backup files', async ({ expect }) => {
     manager.add('testValue')
     await new Promise(resolve => setTimeout(resolve, 600)) // await backup
-    expect(logger.debug.calledWith(`Saved current filter : id ${manager.instanceId}`)).toBe(true)
-    expect(logger.debug.calledWith(`Temp file cleared for instance ${manager.instanceId}`)).toBe(true)
+    expect(logger.debug.calledWith(`Saved current filter : id ${manager.id}`)).toBe(true)
+    expect(logger.debug.calledWith(`Temp file cleared for instance ${manager.id}`)).toBe(true)
     expect(logger.debug.calledWith('No previous filter to backup before first rotation')).toBe(true)
     manager.add('testValue2')
     await new Promise(resolve => setTimeout(resolve, 600)) // await rotation
@@ -354,9 +392,9 @@ test.group('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', 
     expect(manager.has('testValue3')).toBe(false)
   })
 
-  test('resetAndClearData sets previousDone to false', async ({ expect }) => {
+  test('resetAndClearData sets hasRotated to false', async ({ expect }) => {
     await manager.resetAndClearData()
-    expect(manager.previousDone).toBe(false)
+    expect(manager.hasRotated).toBe(false)
   })
 
   test('destroy method properly cleans up the manager', async ({ expect }) => {
@@ -386,10 +424,11 @@ test.group('BloomFilterManager Rotation', (group) => {
         error: sinon.spy()
       }
       manager = new BloomFilterManager({
-          numItems: 1000,
-          fpRate: 0.01,
-          rotateTime: 500, // Temps de rotation court pour les tests
-          logger
+        id: 'test',
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 500, // Temps de rotation court pour les tests
+        logger
       })
   })
 
@@ -406,13 +445,13 @@ test.group('BloomFilterManager Rotation', (group) => {
     expect(manager.current).not.toBe(initialCurrent)
   })
 
-  test('rotate set previousDone to true', async ({ expect }) => {
+  test('rotate set hasRotated to true', async ({ expect }) => {
       await manager.resetAndClearData()
       await new Promise(resolve => setTimeout(resolve, 600)) // Attendre la rotation
-      expect(manager.previousDone).toBe(true)
-      manager.previousDone = false
+      expect(manager.hasRotated).toBe(true)
+      manager.hasRotated = false
       await new Promise(resolve => setTimeout(resolve, 600)) // Attendre la rotation
-      expect(manager.previousDone).toBe(true)
+      expect(manager.hasRotated).toBe(true)
   })
 
   test('rotate is called after rotateTime', async ({ expect }) => {

@@ -32,11 +32,15 @@ test.group('Middleware Tests', (group) => {
   test('JWT Middleware - if in development mode, logger is called', async ({ expect }) => {
     process.env.NODE_ENV = 'development'
     const revoker = new Revoker({
-      numItems: 1000,
-      fpRate: 0.01,
-      rotateTime: 1000,
+      id: 'test',
       claimsToCheck: ['claim1'],
+      payloadKey: 'token',
       logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 1000
+      },
     })
 
     const middleware = revoker.getMiddleware()
@@ -53,17 +57,20 @@ test.group('Middleware Tests', (group) => {
     expect(logger.warn.called).toBe(false)
     expect(logger.error.called).toBe(false)
     await revoker.resetAndClearData();
-    revoker.destroy()
+    await revoker.destroy()
   })
 
   test('JWT Middleware - missing token', async ({ expect }) => {
     const revoker = new Revoker({
-      numItems: 1000,
-      fpRate: 0.01,
-      rotateTime: 2000,
+      id: 'test',
       claimsToCheck: ['claim1', 'claim2'],
+      payloadKey: 'token',
       logger,
-      backupInterval: 5 * 60000 // 5 minutes
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
     })
     
     const middleware = revoker.getMiddleware()
@@ -79,20 +86,23 @@ test.group('Middleware Tests', (group) => {
       message: expect.stringContaining('Invalid token!')
     })
     await revoker.resetAndClearData();
-    revoker.destroy()
+    await revoker.destroy()
 
   })
 
   test('JWT Middleware - missing required claim', async ({ expect }) => {
     const revoker = new Revoker({
-      numItems: 1000,
-      fpRate: 0.001,
-      rotateTime: 1000,
+      id: 'test',
       claimsToCheck: ['claim1', 'claim2'],
+      payloadKey: 'token',
       logger,
-      backupInterval: 5 * 60000 // 5 minutes
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
     })
-    
+     
     const middleware = revoker.getMiddleware()
     req = {
       token: {
@@ -112,16 +122,20 @@ test.group('Middleware Tests', (group) => {
       message: expect.stringContaining('Invalid token!')
     })
     await revoker.resetAndClearData();
-    revoker.destroy()
+    await revoker.destroy()
   })
 
   test('JWT Middleware - valid token with all required claims', async ({ expect }) => {
     const revoker = new Revoker({
-      numItems: 1000,
-      fpRate: 0.01,
-      rotateTime: 1000,
+      id: 'test',
       claimsToCheck: ['claim1', 'claim2'],
-      logger
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
     })
     
     const middleware = revoker.getMiddleware()
@@ -137,16 +151,20 @@ test.group('Middleware Tests', (group) => {
     expect(res.status.called).toBe(false)
     expect(res.json.called).toBe(false)
     await revoker.resetAndClearData();
-    revoker.destroy()
+    await revoker.destroy()
   })
 
   test('JWT Middleware - valid token with all required claims and blacklisted claim', async ({ expect }) => {
     const revoker = new Revoker({
-      numItems: 1000,
-      fpRate: 0.01,
-      rotateTime: 2000,
+      id: 'test',
       claimsToCheck: ['claim1', 'claim2'],
+      payloadKey: 'token',
       logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
     })
 
     const middleware = revoker.getMiddleware()
@@ -169,16 +187,20 @@ test.group('Middleware Tests', (group) => {
       message: expect.stringContaining('Invalid token!')
     })
     await revoker.resetAndClearData();
-    revoker.destroy()
+    await revoker.destroy()
   })
 
   test('JWT Middleware - log internal error', async ({ expect }) => {
     const revoker = new Revoker({
-      numItems: 1000,
-      fpRate: 0.01,
-      rotateTime: 2000,
+      id: 'test',
       claimsToCheck: ['claim1', 'claim2'],
+      payloadKey: 'token',
       logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
     })
 
     const middleware = revoker.getMiddleware()
@@ -201,19 +223,22 @@ test.group('Middleware Tests', (group) => {
       message: expect.stringContaining('An unexpected error occurred')
     })
     await revoker.resetAndClearData();
-    revoker.destroy()
+    await revoker.destroy()
   })
 
   test('Opaque Middleware - if in development mode, logger is called', async ({ expect }) => {
     process.env.NODE_ENV = 'development'
     const revoker = new Revoker({
-      numItems: 1000,
-      fpRate: 0.01,
-      rotateTime: 1000,
+      id: 'test',
       opaqueHeader: 'Authorization',
-      logger
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
     })
-
+    
     const middleware = revoker.getMiddleware()
     const req = {
       headers: {
@@ -229,17 +254,20 @@ test.group('Middleware Tests', (group) => {
     expect(logger.warn.called).toBe(false)
     expect(logger.error.called).toBe(false)
     await revoker.resetAndClearData();
-    revoker.destroy()
+    await revoker.destroy()
 
   })
 
   test('Opaque Middleware - valid Authorization header', async ({ expect }) => {
     const revoker = new Revoker({
-      numItems: 1000,
-      fpRate: 0.01,
-      rotateTime: 1000,
+      id: 'test',
       opaqueHeader: 'Authorization',
-      logger
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
     })
     
     const middleware = revoker.getMiddleware()
@@ -255,16 +283,19 @@ test.group('Middleware Tests', (group) => {
     expect(res.status.called).toBe(false)
     expect(res.json.called).toBe(false)
     await revoker.resetAndClearData();
-    revoker.destroy()
+    await revoker.destroy()
   })
 
   test('Opaque Middleware - missing Authorization header', async ({ expect }) => {
     const revoker = new Revoker({
-      numItems: 1000,
-      fpRate: 0.01,
-      rotateTime: 1000,
+      id: 'test',
       opaqueHeader: 'Authorization',
-      logger
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
     })
     
     const middleware = revoker.getMiddleware()
@@ -282,16 +313,19 @@ test.group('Middleware Tests', (group) => {
     expect(res.status.calledWith(401)).toBe(true)
     expect(res.json.calledOnce).toBe(true)
     await revoker.resetAndClearData();
-    revoker.destroy()
+    await revoker.destroy()
   })
 
   test('Opaque Middleware - invalid Authorization header format', async ({ expect }) => {
     const revoker = new Revoker({
-      numItems: 1000,
-      fpRate: 0.01,
-      rotateTime: 1000,
+      id: 'test',
       opaqueHeader: 'Authorization',
-      logger
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
     })
     
     const middleware = revoker.getMiddleware()
@@ -311,16 +345,19 @@ test.group('Middleware Tests', (group) => {
     expect(res.status.calledWith(401)).toBe(true)
     expect(res.json.calledOnce).toBe(true)
     await revoker.resetAndClearData();
-    revoker.destroy()
+    await revoker.destroy()
   })
 
   test('Opaque Middleware - blacklisted token', async ({ expect }) => {
     const revoker = new Revoker({
-      numItems: 1000,
-      fpRate: 0.01,
-      rotateTime: 1000,
+      id: 'test',
       opaqueHeader: 'Authorization',
-      logger
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
     })
     
     const token = 'validToken'
@@ -343,16 +380,19 @@ test.group('Middleware Tests', (group) => {
     expect(res.status.calledWith(401)).toBe(true)
     expect(res.json.calledOnce).toBe(true)
     await revoker.resetAndClearData();
-    revoker.destroy()
+    await revoker.destroy()
   })
 
   test('Opaque Middleware - custom header validation', async ({ expect }) => {
     const revoker = new Revoker({
-      numItems: 1000,
-      fpRate: 0.01,
-      rotateTime: 1000,
+      id: 'test',
       opaqueHeader: 'X-Custom-Token',
-      logger
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
     })
     
     const middleware = revoker.getMiddleware()
@@ -368,16 +408,19 @@ test.group('Middleware Tests', (group) => {
     expect(res.status.called).toBe(false)
     expect(res.json.called).toBe(false)
     await revoker.resetAndClearData();
-    revoker.destroy()
+    await revoker.destroy()
   })
 
   test('Opaque Middleware - log internal error', async ({ expect }) => {
     const revoker = new Revoker({
-      numItems: 1000,
-      fpRate: 0.01,
-      rotateTime: 2000,
+      id: 'test',
       opaqueHeader: 'Authorization',
       logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
     })
 
     const middleware = revoker.getMiddleware()
@@ -400,7 +443,7 @@ test.group('Middleware Tests', (group) => {
       message: expect.stringContaining('An unexpected error occurred')
     })
     await revoker.resetAndClearData();
-    revoker.destroy()
+    await revoker.destroy()
   })
 
 //   test('JWT Middleware - throttleJWT is called in non-development mode with warn message', async ({ expect }) => {
@@ -432,7 +475,7 @@ test.group('Middleware Tests', (group) => {
 //     throttleJWTStub.restore(); // Restore the stubbed method
 //     process.env.NODE_ENV = 'test'; // Reset to default environment
 //     await revoker.resetAndClearData();
-//     revoker.destroy();
+//     await revoker.destroy();
 //   });
 
 //   test('Opaque Middleware - throttleOpaque is called in non-development mode with warn message', async ({ expect }) => {
@@ -462,8 +505,338 @@ test.group('Middleware Tests', (group) => {
   
 //     throttleOpaqueStub.restore(); // Restore the stubbed method
 //     process.env.NODE_ENV = 'test'; // Reset to default environment
-//     revoker.destroy();
+//     await revoker.destroy();
 //   });
+
+})
+
+test.group('Revoker Constructor Validation Tests', (group) => {
+  let logger
+  // let destroySpy
+
+  group.each.setup(() => {
+    logger = {
+      info: sinon.spy(),
+      warn: sinon.spy(),
+      debug: sinon.spy(),
+      error: sinon.spy()
+    }
+    // destroySpy = sinon.spy(BloomFilterManager.prototype, 'destroy')
+  })
+
+
+  group.each.teardown(() => {
+    sinon.restore() 
+    // destroySpy.restore()
+  })
+
+  test('Constructor throws error if id is not provided', ({ expect }) => {
+    expect(() => new Revoker({
+      claimsToCheck: ['claim1', 'claim2'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })).toThrow('Invalid input: \"id\" is required')      
+  });
+
+  test('Constructor throws error if id is not a string', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 123,
+      claimsToCheck: ['claim1', 'claim2'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })).toThrow('Invalid input: \"id\" must be a string')
+  });
+
+  test('Constructor throws error if logger is not provided', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1', 'claim2'],
+      payloadKey: 'token',
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })).toThrow('Invalid input: \"logger\" is required')
+  });
+
+  test('Constructor throws error if logger is not an object', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 'test',
+      logger: 'logger',
+      claimsToCheck: ['claim1', 'claim2'],
+      payloadKey: 'token',
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })).toThrow('Invalid input: \"logger\" must be of type object')
+  });
+
+  test('Constructor throws error if logger is missing required methods', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 'test',
+      logger: { // logger is missing the error method
+        info: sinon.spy(),
+        warn: sinon.spy(),
+        debug: sinon.spy(),
+      },
+      claimsToCheck: ['claim1', 'claim2'],
+      payloadKey: 'token',
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })).toThrow('Invalid input: \"logger.error\" is required')
+  });
+
+  test('Constructor throws error if claimsToCheck and opaqueHeader are not provided together', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 'test',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })).toThrow('Invalid input: \"claimsToCheck\" is required') //first error
+  });
+
+  test('Constructor throws error if opaqueHeader and claimsToCheck are provided together', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      opaqueHeader: 'Authorization',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })).toThrow('Invalid input: \"claimsToCheck\" is not allowed') // First error
+  });
+
+  test('Constructor throws error if claimsToCheck is not an array', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 'test',
+      claimsToCheck: 'claim1',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })).toThrow('Invalid input: \"claimsToCheck\" must be an array')
+  });
+
+  test('Constructor throws error if claimsToCheck is an empty array', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 'test',
+      claimsToCheck: [],
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })).toThrow('Invalid input: \"claimsToCheck\" must contain at least 1 items')
+  });
+
+  test('Constructor throws error if claimsToCheck contains non-string values', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1', 123],
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })).toThrow('Invalid input: \"claimsToCheck[1]\" must be a string')
+  });
+
+  test('Constructor throws error if claimsToCheck is provided and payloadKey is not provided', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })).toThrow('Invalid input: \"payloadKey\" is required')
+  });
+
+  test('Constructor throws error if claimsToCheck is provided and payloadKey is not a string', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 123,
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })).toThrow('Invalid input: \"payloadKey\" must be a string')
+  });
+
+  test('Constructor throws error if opaqueHeader is not a string', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 'test',
+      opaqueHeader: 123,
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })).toThrow('Invalid input: \"opaqueHeader\" must be a string')
+  });
+
+  test('Constructor throws error if filter is not provided', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger
+    })).toThrow('Invalid input: \"filter\" is required')
+  });
+
+  test('Constructor throws error if filter is not an object', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: 'filter'
+    })).toThrow('Invalid input: \"filter\" must be of type object')
+  });
+
+  test('Constructor throws error if grpcEnabled is true and grpcPort is not provided', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
+      grpcEnabled: true
+    })).toThrow('Invalid input: \"grpcPort\" is required')
+  });
+
+  test('Constructor throws error if grpcEnabled is not a boolean', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
+      grpcEnabled: 'true',
+      grpcPort: '50051',
+    })).toThrow('Invalid input: \"grpcEnabled\" must be a boolean')
+  });
+
+  test('Constructor throws error if grpcPort is provide and GrpcEnabled is not provided', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
+      grpcPort: '50051',
+    })).toThrow('Invalid input: \"grpcPort\" is not allowed')
+  });
+
+  test('Constructor throws error if grpcPort is not a string', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
+      grpcEnabled: true,
+      grpcPort: 50051,
+    })).toThrow('Invalid input: \"grpcPort\" must be a string')
+  });
+
+  test('Constructor not throws error if grpcEnabled is false and grpcPort is not provided', async ({ expect }) => {
+    let revoker;
+    expect(() => revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
+      grpcEnabled: false,
+    })).not.toThrow()
+
+    await revoker.destroy()
+  });
+
+  test('Constructor not throws error if all required parameters are provided for JWT', async ({ expect }) => {
+    let revoker;
+    expect(() => revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
+      grpcEnabled: true,
+      grpcPort: '50051',
+    })).not.toThrow()
+
+    await revoker.destroy()
+  });
+
+  test('Constructor not throws error if all required parameters are provided for Opaque', ({ expect }) => {
+    expect(() => new Revoker({
+      id: 'test',
+      opaqueHeader: 'Authorization',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    }).not.toThrow())
+  });
 
 })
 
@@ -487,38 +860,9 @@ test.group('Revoker Class Tests', (group) => {
     destroySpy.restore()
   })
 
-  test('constructor handles invalid numItems parameter', ({ expect }) => {
-    expect(() => new Revoker({
-      numItems: -1,
-      fpRate: 0.01,
-      rotateTime: 1000,
-      claimsToCheck: ['claim1'],
-      logger
-    })).toThrow()
-  })
-
-  test('constructor handles invalid fpRate parameter', ({ expect }) => {
-    expect(() => new Revoker({
-      numItems: 1000,
-      fpRate: 2,
-      rotateTime: 1000,
-      claimsToCheck: ['claim1'],
-      logger
-    })).toThrow()
-  })
-
-  test('constructor handles invalid rotateTime parameter', ({ expect }) => {
-    expect(() => new Revoker({
-      numItems: 1000,
-      fpRate: 0.01,
-      rotateTime: -1,
-      claimsToCheck: ['claim1'],
-      logger
-    })).toThrow()
-  })
-
   test('constructor initializes throttle functions properly', async ({ expect }) => {
     const revoker = new Revoker({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
@@ -528,11 +872,12 @@ test.group('Revoker Class Tests', (group) => {
 
     expect(typeof revoker.throttleJWT).toBe('function')
     expect(typeof revoker.throttleOpaque).toBe('function')
-    revoker.destroy()
+    await revoker.destroy()
   })
 
   test('add method handles empty or invalid input', async ({ expect }) => {
     const revoker = new Revoker({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
@@ -544,11 +889,12 @@ test.group('Revoker Class Tests', (group) => {
     expect(() => revoker.add(null)).toThrow('Value must be a non-empty string')
     expect(() => revoker.add(undefined)).toThrow('Value must be a non-empty string')
 
-    revoker.destroy()
+    await revoker.destroy()
   })
 
   test('destroy method handles multiple calls safely', async ({ expect }) => {
     const revoker = new Revoker({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
@@ -556,82 +902,88 @@ test.group('Revoker Class Tests', (group) => {
       logger
     })
 
-    revoker.destroy()
-    expect(async() => await revoker.destroy()).not.toThrow()
+    await revoker.destroy()
+    expect(async() => await await revoker.destroy()).not.toThrow()
     expect(revoker.bloomFilterManager).toBeNull()
   })
 
   test('add method handles null bloomFilterManager', async ({ expect }) => {
     const revoker = new Revoker({
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 1000,
-        claimsToCheck: ['claim1'],
-        logger
+      id: 'test',
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 1000,
+      claimsToCheck: ['claim1'],
+      logger
     })
     revoker.bloomFilterManager.destroy()
     revoker.bloomFilterManager = null; // Simulate a null manager
     expect(async () => await revoker.add('test')).not.toThrow();//Should not throw an error
-    revoker.destroy()
+    await revoker.destroy()
   })
 
   test('reset method handles null bloomFilterManager', async ({ expect }) => {
-      const revoker = new Revoker({
-          numItems: 1000,
-          fpRate: 0.01,
-          rotateTime: 1000,
-          claimsToCheck: ['claim1'],
-          logger
-      })
-      revoker.bloomFilterManager.destroy()
-      revoker.bloomFilterManager = null; // Simulate a null manager
-      expect(() => revoker.resetAndRestore()).not.toThrow();//Should not throw an error
-      revoker.destroy()
+    const revoker = new Revoker({
+      id: 'test',
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 1000,
+      claimsToCheck: ['claim1'],
+      logger
+    })
+    revoker.bloomFilterManager.destroy()
+    revoker.bloomFilterManager = null; // Simulate a null manager
+    expect(() => revoker.resetAndRestore()).not.toThrow();//Should not throw an error
+    await revoker.destroy()
   })
 
   test('destroy method handles multiple calls safely and sets bloomFilterManager to null', async ({ expect }) => {
-      const revoker = new Revoker({
-          numItems: 1000,
-          fpRate: 0.01,
-          rotateTime: 1000,
-          claimsToCheck: ['claim1'],
-          logger
-      })
+    const revoker = new Revoker({
+      id: 'test',
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 1000,
+      claimsToCheck: ['claim1'],
+      logger
+    })
 
-      revoker.destroy()
-      expect(async () => await revoker.destroy()).not.toThrow()
-      expect(revoker.bloomFilterManager).toBeNull() // This line was already covered, but it's good to keep it
+    await revoker.destroy()
+    expect(async () => await await revoker.destroy()).not.toThrow()
+    expect(revoker.bloomFilterManager).toBeNull() // This line was already covered, but it's good to keep it
   })
 
   test('destroy method calls destroy on bloomFilterManager', async ({ expect }) => {
-      const revoker = new Revoker({
-          numItems: 1000,
-          fpRate: 0.01,
-          rotateTime: 1000,
-          claimsToCheck: ['claim1'],
-          logger
-      })
+    const revoker = new Revoker({
+      id: 'test',
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 1000,
+      claimsToCheck: ['claim1'],
+      logger
+    })
 
-      revoker.destroy()
-      expect(destroySpy.calledOnce).toBe(true)
+    await revoker.destroy()
+    expect(destroySpy.calledOnce).toBe(true)
   })
 
   test('getMiddleware throws error if middleware is not present', async ({ expect }) => {
-      const revoker = new Revoker({
-          numItems: 1000,
-          fpRate: 0.01,
-          rotateTime: 1000,
-          claimsToCheck: ['claim1'],
-          logger
-      });
-      revoker.middleware = null;
-      expect(() => revoker.getMiddleware()).toThrow("Middleware not configured");
-      revoker.destroy();
+    const revoker = new Revoker({
+      id: 'test',
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 1000,
+      claimsToCheck: ['claim1'],
+      logger
+    });
+    revoker.middleware = null;
+    expect(() => revoker.getMiddleware()).toThrow("Middleware not configured");
+    await revoker.destroy();
   })
 
   test('bloom Filter is destroyedif opaqueHeader or claimsToCheck is not provided', ({ expect }) => {
     expect(() => {
       new Revoker({
+        id: 'test',
         numItems: 1000,
         fpRate: 0.01,
         rotateTime: 1000,
@@ -646,6 +998,7 @@ test.group('Revoker Class Tests', (group) => {
   test('bloom filter restet is called if reset revoker is called', async({ expect }) => {
     const resetSpy = sinon.spy(BloomFilterManager.prototype, 'resetAndRestore');
     const revoker = new Revoker({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
@@ -654,7 +1007,7 @@ test.group('Revoker Class Tests', (group) => {
     });
     await revoker.resetAndRestore();
     expect(resetSpy.calledOnce).toBe(true);
-    revoker.destroy();
+    await revoker.destroy();
   })
 })
 
@@ -674,12 +1027,13 @@ test.group('Extended Middleware Tests', (group) => {
 
   group.each.teardown(async () => {
     if (revoker) {
-      revoker.destroy()
+      await revoker.destroy()
     }
   })
 
   test('JWT Middleware - handles non-string claim values', async ({ expect }) => {
     const revoker = new Revoker({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
@@ -701,11 +1055,12 @@ test.group('Extended Middleware Tests', (group) => {
 
     middleware(req, res, next)
     expect(next.called).toBe(true)
-    revoker.destroy()
+    await revoker.destroy()
   })
 
   test('JWT Middleware - handles array of claim values', async ({ expect }) => {
     revoker = new Revoker({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
@@ -731,6 +1086,7 @@ test.group('Extended Middleware Tests', (group) => {
 
   test('Opaque Middleware - handles empty string token', async ({ expect }) => {
     revoker = new Revoker({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
@@ -759,6 +1115,7 @@ test.group('Extended Middleware Tests', (group) => {
 
   test('Opaque Middleware - handles malformed Bearer token', async ({ expect }) => {
     revoker = new Revoker({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
@@ -787,6 +1144,7 @@ test.group('Extended Middleware Tests', (group) => {
 
   test('Opaque Middleware - handles case-insensitive header names', async ({ expect }) => {
     revoker = new Revoker({
+      id: 'test',
       numItems: 1000,
       fpRate: 0.01,
       rotateTime: 1000,
@@ -839,7 +1197,7 @@ test.group('Extended Middleware Tests', (group) => {
   //   expect(logger.error.calledOnceWithExactly('Token claim1 is blacklisted'));
   //   process.env.NODE_ENV = 'test';
   //   logOrThrottleStub.restore();
-  //   revoker.destroy();
+  //   await revoker.destroy();
   // });
 
   // test('Opaque Middleware - throttle is called in non-development mode', async ({ expect }) => {
@@ -872,7 +1230,7 @@ test.group('Extended Middleware Tests', (group) => {
   //   expect(logger.warn.called).toBe(false);
   //   expect(logger.error.calledOnceWithExactly(`Token ${token} is blacklisted`));
   //   process.env.NODE_ENV = 'test';
-  //   await revoker.destroy();
+  //   await await revoker.destroy();
 
 
   });

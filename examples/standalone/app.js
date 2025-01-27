@@ -106,9 +106,9 @@ app.listen(port, () => {
   console.log(`API-server HTTP running on port ${port}`);
 });
 
-process.on("SIGINT", () => {
-  JWTrevoker.destroy();
-  opaqueRevoker.destroy();
-  opaqueRevokerCustom.destroy();
+process.on("SIGINT", async () => {
+  await JWTrevoker.destroy();
+  await opaqueRevoker.destroy();
+  await opaqueRevokerCustom.destroy();
   process.exit(0);
 });

@@ -23,7 +23,7 @@ import './types.js';
 
 import { BloomFilterManager } from "./Bloom-filter-manager.js";
 import throttle from "throttleit";
-import { registerRevokerInstance, startServer } from "./grpc/std-server.js";
+import { stopServer, registerRevokerInstance, startServer } from "./grpc/std-server.js";
 import { revokerInputSchema } from "./Inputs-validation.js";
 
 /**
@@ -223,23 +223,14 @@ export class Revoker {
   /** @type {RequestHandler | null} */
   middleware = null;
 
-  // /** @type {Function} */
-  // throttleLog = () => {};
-
   /** @type {string} */
   id;
-
-  // /** @type {'standalone' | 'distributed' | 'cluster'} */
-  // mode;
 
   /** @type {GenericLogger} */
   logger;
 
   /** @type {boolean} */
   grpcEnabled;
-
-  // /** @type {string | undefined} */
-  // grpcPort;
 
   /** @type {boolean} */
   static grpcServerStarted = false;
@@ -273,7 +264,7 @@ export class Revoker {
 
     const { error } = revokerInputSchema.validate(config);
     if (error) {
-      throw new Error(error.message);
+      throw new Error(`Invalid input: ${error.message}`);
     }
 
     const {
@@ -422,9 +413,12 @@ export class Revoker {
   }
   /**
    * Destroys the Bloom filter manager.
-   * @returns {void}
+   * @returns {Promise<void>}
    */
-  destroy() {
+  async destroy() {
+    if (this.grpcEnabled) {
+      await stopServer();
+    }
     if (this.bloomFilterManager) {
       this.bloomFilterManager.destroy();
       this.middleware = null;
