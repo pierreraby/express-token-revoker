@@ -7,12 +7,13 @@ import path from 'path';
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { Mutex } from 'async-mutex';
+import { filterInputSchema } from './Inputs-validation.js';
 
 // Define __filename and __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename)
 
- // * @property {'import("./index.js").GenericLogger'} logger - Any logger implementing the basic logging methods
+// Redefinition of the GenericLogger type to keep the BloomFilterManager class independent
 /**
  * @typedef {Object} GenericLogger
  * @property {function(...any): void} error - Log an error message
@@ -93,7 +94,7 @@ export class BloomFilterManager {
    * @private
    * @type {boolean}
    * */
-  previousDone
+  hasRotated
 
   /**
    * @private
@@ -131,46 +132,52 @@ export class BloomFilterManager {
    */
   constructor(options) {
 
+    // Validate input
+    const { error } = filterInputSchema.validate(options);
+    if (error) {
+      throw new Error(`Invalid input: ${error.message}`);
+    }
+
     const { numItems, fpRate, rotateTime, id, backup, backupTime, logger } = options;
 
-    if (!numItems || !Number.isInteger(numItems)  || numItems <= 0) {
-      logger.error('numItems must be a positive integer.');
-      throw new Error('numItems must be a positive integer.');
-    }
-    if (!fpRate || fpRate <= 0 || fpRate >= 1) {
-      logger.error('fpRate must be a number between 0 and 1 (exclusive).');
-      throw new Error('fpRate must be a number between 0 and 1 (exclusive).');
-    }
-    if (!rotateTime || !Number.isInteger(rotateTime) || rotateTime <= 0) {
-      logger.error('rotateTime must be a positive integer.');
-      throw new Error('rotateTime must be a positive integer.');
-    }
-    if (!id || typeof id !== 'string') {
-      logger.error('id must be a string.');
-      throw new Error('id must be a string.');
-    }
+    // if (!numItems || !Number.isInteger(numItems)  || numItems <= 0) {
+    //   logger.error('numItems must be a positive integer.');
+    //   throw new Error('numItems must be a positive integer.');
+    // }
+    // if (!fpRate || fpRate <= 0 || fpRate >= 1) {
+    //   logger.error('fpRate must be a number between 0 and 1 (exclusive).');
+    //   throw new Error('fpRate must be a number between 0 and 1 (exclusive).');
+    // }
+    // if (!rotateTime || !Number.isInteger(rotateTime) || rotateTime <= 0) {
+    //   logger.error('rotateTime must be a positive integer.');
+    //   throw new Error('rotateTime must be a positive integer.');
+    // }
+    // if (!id || typeof id !== 'string') {
+    //   logger.error('id must be a string.');
+    //   throw new Error('id must be a string.');
+    // }
 
-    if (backup && typeof backup !== 'boolean') {
-      logger.error('backup must be a boolean.');
-      throw new Error('backup must be a boolean.');
-    }
-    if (backup && backupTime) {
-      if (!Number.isInteger(backupTime) || backupTime <= 0) {
-        logger.error('backupTime must be a positive integer.');
-        throw new Error('backupTime must be a positive integer.');
-      }
-      if (backupTime>= rotateTime) {
-        logger.error('backupTime must be less than rotateTime.');
-        throw new Error('backupTime must be less than rotateTime.');
-      }
-    }
+    // if (backup && typeof backup !== 'boolean') {
+    //   logger.error('backup must be a boolean.');
+    //   throw new Error('backup must be a boolean.');
+    // }
+    // if (backup && backupTime) {
+    //   if (!Number.isInteger(backupTime) || backupTime <= 0) {
+    //     logger.error('backupTime must be a positive integer.');
+    //     throw new Error('backupTime must be a positive integer.');
+    //   }
+    //   if (backupTime>= rotateTime) {
+    //     logger.error('backupTime must be less than rotateTime.');
+    //     throw new Error('backupTime must be less than rotateTime.');
+    //   }
+    // }
 
-    if (!logger || typeof logger !== 'object') {
-      throw new Error('logger must be an object.');
-    }
-    if (!logger.error || !logger.warn || !logger.info || !logger.debug) {
-      throw new Error('logger must have methods info, warn, debug, and error.');
-    }
+    // if (!logger || typeof logger !== 'object') {
+    //   throw new Error('logger must be an object.');
+    // }
+    // if (!logger.error || !logger.warn || !logger.info || !logger.debug) {
+    //   throw new Error('logger must have methods info, warn, debug, and error.');
+    // }
 
     /** @private */
     this.id = id;
@@ -187,7 +194,7 @@ export class BloomFilterManager {
     /** @private */
     this.logger = logger;
     /** @private */
-    this.previousDone = false;
+    this.hasRotated = false;
     /** @private */
     this.mutex = new Mutex();
 
@@ -235,12 +242,13 @@ export class BloomFilterManager {
 
   /**
    * Checks if backup files exist.
+   * @returns {boolean} - `true` if backup files exist, `false` otherwise.
    */
   #backupExists() {
     try {
         const files = fs.readdirSync(this.backupDir);
         return files.length !== 0;// Check if the backup directory is not empty
-          } catch (error) {
+        } catch (error) {
         this.logger.error('Error checking if backup exist:', error);
         return false; // In case of an error, we consider that the backup does not exist
     }
@@ -258,6 +266,7 @@ export class BloomFilterManager {
   /**
   * Ensures that the backup directory exists.
   * @returns {void}
+  * @throws {Error} If an error occurs while creating the backup directory.
   */
   #ensureBackupDirExists() {
     try {
@@ -311,7 +320,7 @@ export class BloomFilterManager {
         const filePath = name === "current" ? this.backupCurrentPath : this.backupPreviousPath;
 
         // Skip previous filter backup if not needed before first rotation
-        if (name === "previous" && !filter && !this.previousDone) {
+        if (name === "previous" && !filter && !this.hasRotated) {
           this.logger.debug('No previous filter to backup before first rotation');
           continue;
         }
@@ -339,7 +348,6 @@ export class BloomFilterManager {
   /**
    * Backup the current and previous filters.
    * @returns {Promise<void>}
-   * @throws {Error} If an error occurs while backing up the filters.
    */
   async #backup() {
     const release = await this.mutex.acquire();
@@ -428,10 +436,9 @@ export class BloomFilterManager {
   /**
   * Restore the current and previous filters.
   * @returns {void}
-  * @throws {Error} If an error occurs while restoring the filters.
   */
   #restore() {
-    // in future, we should restore remotly
+    // it's only on call function, but in future, perahps we can restore remote backup
     this.#restoreLocal('all');
   }
 
@@ -459,8 +466,8 @@ export class BloomFilterManager {
   async #rotate() {
     const release = await this.mutex.acquire();
     try {
-      if (!this.previousDone) {
-        this.previousDone = true;
+      if (!this.hasRotated) {
+        this.hasRotated = true;
       }
       this.logger.debug('Rotating Bloom filters...');
       if (this.backupEnabled) {
@@ -583,10 +590,10 @@ export class BloomFilterManager {
         metrics.currentFpRate = this.current.error();
       }
 
-      if (this.previous && this.previousDone) {
+      if (this.previous && this.hasRotated) {
         metrics.previousCount = this.previous.size();
         metrics.previousFpRate = this.previous.error();
-      } else if (!this.previousDone) {
+      } else if (!this.hasRotated) {
         this.logger.debug('No previous filter to get metrics before first rotation');
       }
       this.logger.info(`Estimated metrics: ${JSON.stringify(metrics)}`);
@@ -651,7 +658,7 @@ export class BloomFilterManager {
     await this.#deleteBackupFile(this.backupCurrentPath, 'Current');
     await this.#deleteBackupFile(this.backupPreviousPath, 'Previous');
     await this.#deleteBackupFile(this.backupTempFilePath, 'Temporary');
-    this.previousDone = false;
+    this.hasRotated = false;
     await this.resetAndRestore();
   }
 

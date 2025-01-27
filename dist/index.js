@@ -1,12 +1,8 @@
 // @ts-check
+import './types.js';
 
 /**
- * @typedef {Object} GenericLogger
- * @property {function(...any): void} error - Log an error message
- * @property {function(...any): void} warn - Log a warning message
- * @property {function(...any): void} info - Log an info message
- * @property {function(...any): void} debug - Log a debug message
- * @property {function(...any): void} trace - Log a trace message
+ * @typedef {import('./types.js').GenericLogger} GenericLogger
  */
 
 /**
@@ -28,6 +24,7 @@
 import { BloomFilterManager } from "./Bloom-filter-manager.js";
 import throttle from "throttleit";
 import { registerRevokerInstance, startServer } from "./grpc/std-server.js";
+import { revokerInputSchema } from "./Inputs-validation.js";
 
 /**
    * Logs or throttles messages based on the environment.
@@ -182,7 +179,7 @@ const createOpaqueMiddleware = (header, bloomFilterManager, logger, throttleOpaq
     return true;
   };
   
-    /**
+  /**
    * Express middleware to validate Opaques tokens/ API KEYS against a Bloom filter.
    * @param {import('express').Request} req - Express request object.
    * @param {import('express').Response} res - Express response object.
@@ -226,14 +223,14 @@ export class Revoker {
   /** @type {RequestHandler | null} */
   middleware = null;
 
-  /** @type {Function} */
-  throttleLog = () => {};
+  // /** @type {Function} */
+  // throttleLog = () => {};
 
   /** @type {string} */
   id;
 
-  /** @type {'standalone' | 'distributed' | 'cluster'} */
-  mode;
+  // /** @type {'standalone' | 'distributed' | 'cluster'} */
+  // mode;
 
   /** @type {GenericLogger} */
   logger;
@@ -241,24 +238,28 @@ export class Revoker {
   /** @type {boolean} */
   grpcEnabled;
 
-  /** @type {string | undefined} */
-  grpcPort;
+  // /** @type {string | undefined} */
+  // grpcPort;
 
   /** @type {boolean} */
   static grpcServerStarted = false;
 
   /**
+   * @typedef {Object} FilterConfig
+   * @property {number} numItems - Number of items to store in the Bloom filter
+   * @property {number} fpRate - Target false positive rate for the Bloom filter
+   * @property {number} rotateTime - Rotation interval in milliseconds
+   * @property {boolean} [backup] - whether to enable backup
+   * @property {number} [backupTime] - Backup interval in milliseconds
+   */
+  
+  /**
    * @typedef {Object} ConfigBase
-
    * @property {string} id - The ID of the Revoker instance.
-   * @property {number} numItems - Number of items to store in the Bloom filter.
-   * @property {number} fpRate - Target false positive rate for the Bloom filter.
-   * @property {number} rotateTime - Rotation interval in milliseconds.
-   * @property {boolean} [backup] - whether to enable backup.
-   * @property {number} [backupTime] - Backup interval in milliseconds.
+   * @property {GenericLogger} logger - Any logger implementing the basic logging methods
    * @property {boolean} [grpcEnabled] - Whether to enable gRPC.
    * @property {string} [grpcPort] - The port for the gRPC server.
-   * @property {GenericLogger} logger - Any logger implementing the basic logging methods
+   * @property {FilterConfig} filter - Configuration options for the Bloom filter.
    * @typedef {ConfigBase & { claimsToCheck: Array<string>, payloadKey: string, opaqueHeader?: never }} JWTConfig
    * @typedef {ConfigBase & { opaqueHeader: string, claimsToCheck?: never, payloadKey?: never }} OpaqueConfig
    * @typedef {JWTConfig | OpaqueConfig} Config
@@ -269,57 +270,19 @@ export class Revoker {
    * @throws {Error} If neither `claimsToCheck` nor `opaqueHeader` is provided.
    */
   constructor(config) {
+
+    const { error } = revokerInputSchema.validate(config);
+    if (error) {
+      throw new Error(error.message);
+    }
+
     const {
-      id, claimsToCheck, payloadKey, opaqueHeader, numItems, fpRate, rotateTime,
-      backup, backupTime, grpcEnabled = false, grpcPort, logger = console
-    } = config;
+      id, claimsToCheck, payloadKey, opaqueHeader, grpcEnabled = false, grpcPort, logger = console, filter
+    } = config;   
 
-    /*** Validate the revoker configuration ***/
-    if (!id || typeof id !== 'string') {
-      logger.error('id must be a string.');
-      throw new Error('id must be a string.');
-    }
+    this.bloomFilterManager = new BloomFilterManager({ id, logger, ...filter });
 
-    if (claimsToCheck && opaqueHeader) {
-      logger.error("claimsToCheck and opaqueHeader cannot be provided at the same time");
-      throw new Error("claimsToCheck and opaqueHeader cannot be provided at the same time");
-    }
-
-    if(claimsToCheck && !Array.isArray(claimsToCheck)) {
-      logger.error('claimsToCheck must be an array.');
-      throw new Error('claimsToCheck must be an array.');
-    }
-
-    if(claimsToCheck && claimsToCheck.length === 0) {
-      logger.error('claimsToCheck must have at least one claim.');
-      throw new Error('claimsToCheck must have at least one claim.');
-    }
-
-    if (claimsToCheck) {
-      for (const claim of claimsToCheck) {
-        if (typeof claim !== 'string') {
-          logger.error('claimsToCheck must be an array of strings.');
-          throw new Error('claimsToCheck must be an array of strings.');
-        }
-      }
-    }
-
-    if (opaqueHeader && typeof opaqueHeader !== 'string') {
-      logger.error('opaqueHeader must be a string.');
-      throw new Error('opaqueHeader must be a string.');
-    }    
-
-    this.bloomFilterManager = new BloomFilterManager({
-      numItems,
-      fpRate,
-      rotateTime,
-      id,
-      backup,
-      backupTime,
-      logger
-    });
-
-    this.throttleLog = throttle((message) => logger.info(message), 60000);
+    const throttleLog = throttle((message) => logger.info(message), 60000);
 
     this.id = id;
     this.logger = logger;
@@ -330,14 +293,14 @@ export class Revoker {
         payloadKey,
         this.bloomFilterManager,
         logger,
-        this.throttleLog
+        throttleLog
       );
     } else if (opaqueHeader) {
         this.middleware = createOpaqueMiddleware(
           opaqueHeader,
           this.bloomFilterManager,
           logger,
-          this.throttleLog,
+          throttleLog,
         );
     } else {
       this.bloomFilterManager.destroy();
@@ -345,14 +308,13 @@ export class Revoker {
     }
 
     this.grpcEnabled = grpcEnabled;
-    this.grpcPort = grpcPort;
 
     if (this.grpcEnabled) {
       registerRevokerInstance(this);
-      if (!Revoker.grpcServerStarted && this.grpcPort) {
-        this.logger.info(`Starting gRPC server with id:  ${this.id}`);
-        this.logger.info(`grpcEnabled: ${this.grpcEnabled}`);
-        startServer(this.grpcPort, this.logger);
+      if (!Revoker.grpcServerStarted && grpcPort) {
+        logger.info(`Starting gRPC server with id:  ${this.id}`);
+        logger.info(`grpcEnabled: ${this.grpcEnabled}`);
+        startServer(grpcPort, logger);
         Revoker.grpcServerStarted = true;
       }
     }
