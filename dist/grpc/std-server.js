@@ -1,3 +1,10 @@
+// @ts-check
+import '../types.js';
+
+/**
+ * @typedef {import('../types.js').GenericLogger} GenericLogger
+ */
+
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import path from 'path';
@@ -34,7 +41,7 @@ const revokerInstances = new Map();
  */
 export function registerRevokerInstance(revokerInstance) {
   revokerInstances.set(revokerInstance.id, revokerInstance);
-  console.log(`Revoker instance ${revokerInstance.id} registered`);
+  revokerInstance.logger.info(`Revoker instance ${revokerInstance.id} registered`);
 }
 
 /**
@@ -51,6 +58,30 @@ const REVOKER_OR_FILTER_NOT_FOUND_MSG = 'Revoker instance or Bloom filter not fo
 
 
 /**
+ * Checks if a revokerInstance has a non-null bloomFilterManager.
+ * @param {Revoker | undefined} revokerInstance
+ * @returns {revokerInstance is Revoker & { bloomFilterManager: NonNullable<Revoker['bloomFilterManager']> }}
+ */
+function hasNonNullableBloomFilterManager(revokerInstance) {
+  return !!revokerInstance && !!revokerInstance.bloomFilterManager;
+}
+
+/**
+ * Finds a Revoker instance by ID.
+ * @param {string} revokerId - The ID of the Revoker instance.
+ * @param {GenericLogger} logger - The logger instance.
+ * @returns {(Revoker & { bloomFilterManager: NonNullable<Revoker['bloomFilterManager']> }) | undefined}
+ */
+function findRevokerInstance(revokerId, logger) {
+  const revokerInstance = revokerInstances.get(revokerId);
+  if (!hasNonNullableBloomFilterManager(revokerInstance)) {
+    logger.error(REVOKER_OR_FILTER_NOT_FOUND_MSG);
+    return undefined;
+  }
+  return revokerInstance;
+}
+
+/**
  * Starts the gRPC server.
  * @param {string} port - The port on which the server should listen.
  * @returns {void}
@@ -63,22 +94,21 @@ export function startServer(port, logger) {
    */
   const revokerService = {
     /**
-     * @param {grpc.ServerUnaryCall<any, any>} call
-     * @param {grpc.sendUnaryData<any>} callback
+     * Adds an item to the Bloom filter.
+     * @param {grpc.ServerUnaryCall<{ revokerId: string, item: string }, { code: number, success: boolean, message: string }>} call - The gRPC call object for the Add method.
+     * @param {grpc.sendUnaryData<{ code: number, success: boolean, message: string }>} callback - The gRPC callback function for the Add method.
      * @returns {void}
      */
     Add: (call, callback) => {
       const { revokerId, item } = call.request;
-      const revokerInstance = revokerInstances.get(revokerId);
+      const revokerInstance = findRevokerInstance(revokerId, logger);
       
-      if (!revokerInstance || !revokerInstance.bloomFilterManager) {
-        logger.error(REVOKER_OR_FILTER_NOT_FOUND_MSG);
+      if (!revokerInstance) {
         return callback({ 
           code: grpc.status.NOT_FOUND, 
           message: REVOKER_OR_FILTER_NOT_FOUND_MSG
         });
       }
-      console.log('item:', item);
     
       try {
         revokerInstance.bloomFilterManager.add(item);
@@ -90,16 +120,16 @@ export function startServer(port, logger) {
       }
     },
     /**
-     * @param {grpc.ServerUnaryCall<any, any>} call
-     * @param {grpc.sendUnaryData<any>} callback
+     * Checks if an item exists in the Bloom filter.
+     * @param {grpc.ServerUnaryCall<{ revokerId: string, item: string }, { code: number, exists: boolean }>} call - The gRPC call object for the Has method.
+     * @param {grpc.sendUnaryData<{ code: number, exists: boolean }>} callback - The gRPC callback function for the Has method.
      * @returns {void}
      */
     Has: (call, callback) => {
       const { revokerId, item } = call.request;
-      const revokerInstance = revokerInstances.get(revokerId);
+      const revokerInstance = findRevokerInstance(revokerId, logger);
       
-      if (!revokerInstance || !revokerInstance.bloomFilterManager) {
-        logger.error(REVOKER_OR_FILTER_NOT_FOUND_MSG);
+      if (!revokerInstance) {
         return callback({ 
           code: grpc.status.NOT_FOUND, 
           message: REVOKER_OR_FILTER_NOT_FOUND_MSG
@@ -116,16 +146,16 @@ export function startServer(port, logger) {
       }
     },
     /**
-     * @param {grpc.ServerUnaryCall<any, any>} call
-     * @param {grpc.sendUnaryData<any>} callback
+     * Retrieves metrics for the Bloom filter.
+     * @param {grpc.ServerUnaryCall<{ revokerId: string }, { code: number, estimatedMetrics: Object, configuration: Object }>} call - The gRPC call object for the GetMetrics method.
+     * @param {grpc.sendUnaryData<{ code: number, estimatedMetrics: Object, configuration: Object }>} callback - The gRPC callback function for the GetMetrics method.
      * @returns {void}
      */
     GetMetrics: (call, callback) => {
       const { revokerId } = call.request;
-      const revokerInstance = revokerInstances.get(revokerId);
-
-      if (!revokerInstance || !revokerInstance.bloomFilterManager) {
-        logger.error(REVOKER_OR_FILTER_NOT_FOUND_MSG);
+      const revokerInstance = findRevokerInstance(revokerId, logger);
+      
+      if (!revokerInstance) {
         return callback({ 
           code: grpc.status.NOT_FOUND, 
           message: REVOKER_OR_FILTER_NOT_FOUND_MSG
@@ -145,16 +175,16 @@ export function startServer(port, logger) {
       }
     },
     /**
-     * @param {grpc.ServerUnaryCall<any, any>} call
-     * @param {grpc.sendUnaryData<any>} callback
+     * Resets and restores the Bloom filter.
+     * @param {grpc.ServerUnaryCall<{ revokerId: string }, { code: number, success: boolean, message: string }>} call - The gRPC call object for the ResetAndRestore method.
+     * @param {grpc.sendUnaryData<{ code: number, success: boolean, message: string }>} callback - The gRPC callback function for the ResetAndRestore method.
      * @returns {void}
      */
     ResetAndRestore: (call, callback) => {
       const { revokerId } = call.request;
-      const revokerInstance = revokerInstances.get(revokerId);
-
-      if (!revokerInstance || !revokerInstance.bloomFilterManager) {
-        logger.error(REVOKER_OR_FILTER_NOT_FOUND_MSG);
+      const revokerInstance = findRevokerInstance(revokerId, logger);
+      
+      if (!revokerInstance) {
         return callback({ 
           code: grpc.status.NOT_FOUND, 
           message: REVOKER_OR_FILTER_NOT_FOUND_MSG
@@ -177,16 +207,16 @@ export function startServer(port, logger) {
       });
     },
     /**
-     * @param {grpc.ServerUnaryCall<any, any>} call
-     * @param {grpc.sendUnaryData<any>} callback
+     * Resets the Bloom filter and clears its data.
+     * @param {grpc.ServerUnaryCall<{ revokerId: string }, { code: number, success: boolean, message: string }>} call - The gRPC call object for the ResetAndClearData method.
+     * @param {grpc.sendUnaryData<{ code: number, success: boolean, message: string }>} callback - The gRPC callback function for the ResetAndClearData method.
      * @returns {void}
      */
       ResetAndClearData: (call, callback) => {
       const { revokerId } = call.request;
-      const revokerInstance = revokerInstances.get(revokerId);
-
-      if (!revokerInstance || !revokerInstance.bloomFilterManager) {
-        logger.error(REVOKER_OR_FILTER_NOT_FOUND_MSG);
+      const revokerInstance = findRevokerInstance(revokerId, logger);
+      
+      if (!revokerInstance) {
         return callback({ 
           code: grpc.status.NOT_FOUND, 
           message: REVOKER_OR_FILTER_NOT_FOUND_MSG
@@ -209,22 +239,22 @@ export function startServer(port, logger) {
       });
     },
     /**
-     * @param {grpc.ServerUnaryCall<any, any>} call
-     * @param {grpc.sendUnaryData<any>} callback
+     * Destroys a Revoker instance.
+     * @param {grpc.ServerUnaryCall<{ revokerId: string }, { code: number, success: boolean, message: string }>} call - The gRPC call object for the Destroy method.
+     * @param {grpc.sendUnaryData<{ code: number, success: boolean, message: string }>} callback - The gRPC callback function for the Destroy method.
      * @returns {void}
      */
     Destroy: (call, callback) => {
       const { revokerId } = call.request;
-      const revokerInstance = revokerInstances.get(revokerId);
-
+      const revokerInstance = findRevokerInstance(revokerId, logger);
+      
       if (!revokerInstance) {
-        const message = 'Revoker instance not found';
-        logger.error(message);
         return callback({ 
           code: grpc.status.NOT_FOUND, 
-          message: message
+          message: REVOKER_OR_FILTER_NOT_FOUND_MSG
         });
       }
+
       try {
         revokerInstance.destroy();
         unregisterRevokerInstance(revokerId);
@@ -235,8 +265,9 @@ export function startServer(port, logger) {
       }
     },
     /**
-     * @param {grpc.ServerUnaryCall<any, any>} call
-     * @param {grpc.sendUnaryData<any>} callback
+     * Lists all Revoker instances.
+     * @param {grpc.ServerUnaryCall<null, { code: number, revokerIds: string[] }>} call - The gRPC call object for the ListRevokers method.
+     * @param {grpc.sendUnaryData<{ code: number, revokerIds: string[] }>} callback - The gRPC callback function for the ListRevokers method.
      * @returns {void}
      */
     ListRevokers: (call, callback) => {
@@ -250,6 +281,8 @@ export function startServer(port, logger) {
     },
   };
 
+  // @ts-ignore
+  // protoloader does not generate types for the service
   server.addService(revokerProto.RevokerAdmin.service, revokerService);
   server.bindAsync(`0.0.0.0:${port}`, grpc.ServerCredentials.createInsecure(), (err, port) => {
     if (err) {
