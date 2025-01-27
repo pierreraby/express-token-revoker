@@ -20,7 +20,6 @@ const __dirname = dirname(__filename)
  * @property {function(...any): void} warn - Log a warning message
  * @property {function(...any): void} info - Log an info message
  * @property {function(...any): void} debug - Log a debug message
- * @property {function(...any): void} trace - Log a trace message
  */
 
 /**
@@ -139,45 +138,6 @@ export class BloomFilterManager {
     }
 
     const { numItems, fpRate, rotateTime, id, backup, backupTime, logger } = options;
-
-    // if (!numItems || !Number.isInteger(numItems)  || numItems <= 0) {
-    //   logger.error('numItems must be a positive integer.');
-    //   throw new Error('numItems must be a positive integer.');
-    // }
-    // if (!fpRate || fpRate <= 0 || fpRate >= 1) {
-    //   logger.error('fpRate must be a number between 0 and 1 (exclusive).');
-    //   throw new Error('fpRate must be a number between 0 and 1 (exclusive).');
-    // }
-    // if (!rotateTime || !Number.isInteger(rotateTime) || rotateTime <= 0) {
-    //   logger.error('rotateTime must be a positive integer.');
-    //   throw new Error('rotateTime must be a positive integer.');
-    // }
-    // if (!id || typeof id !== 'string') {
-    //   logger.error('id must be a string.');
-    //   throw new Error('id must be a string.');
-    // }
-
-    // if (backup && typeof backup !== 'boolean') {
-    //   logger.error('backup must be a boolean.');
-    //   throw new Error('backup must be a boolean.');
-    // }
-    // if (backup && backupTime) {
-    //   if (!Number.isInteger(backupTime) || backupTime <= 0) {
-    //     logger.error('backupTime must be a positive integer.');
-    //     throw new Error('backupTime must be a positive integer.');
-    //   }
-    //   if (backupTime>= rotateTime) {
-    //     logger.error('backupTime must be less than rotateTime.');
-    //     throw new Error('backupTime must be less than rotateTime.');
-    //   }
-    // }
-
-    // if (!logger || typeof logger !== 'object') {
-    //   throw new Error('logger must be an object.');
-    // }
-    // if (!logger.error || !logger.warn || !logger.info || !logger.debug) {
-    //   throw new Error('logger must have methods info, warn, debug, and error.');
-    // }
 
     /** @private */
     this.id = id;
@@ -381,7 +341,7 @@ export class BloomFilterManager {
       }
     }
 
-    this.logger.debug(`Elements restored from temp file for instance : id ${this.id}`);
+    this.logger.debug(`Elements restored from temp file for instance : ${this.id}`);
     } catch (error) {
     this.logger.error('Error reading temp file:', error);
   }

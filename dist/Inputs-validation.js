@@ -9,15 +9,17 @@ const revokerInputSchema = Joi.object({
     error: Joi.function().required(),
     warn: Joi.function().required(),
     debug: Joi.function().required(),
-    trace: Joi.function().required(),
     })
     .unknown(true)
     .required()
     .description('Generice logger object'),
   grpcEnabled: Joi.boolean()
+    .strict()
     .description('Enable gRPC server'),
   grpcPort: Joi.string()
     .when('grpcEnabled', { is: true, then: Joi.required() })
+    .when('grpcEnabled', { not: Joi.exist(), then: Joi.forbidden() })
+    .when('grpcEnabled', { is: false, then: Joi.forbidden() })
     .description('Port for gRPC server'),
   claimsToCheck: Joi.array()
     .min(1)
@@ -46,7 +48,6 @@ const filterInputSchema = Joi.object({
     error: Joi.function().required(),
     warn: Joi.function().required(),
     debug: Joi.function().required(),
-    trace: Joi.function().required(),
     })
     .unknown(true)
     .required()
@@ -65,16 +66,17 @@ const filterInputSchema = Joi.object({
   rotateTime: Joi.number()
     .positive()
     .integer()
-    .min(1000)
     .required()
     .description('Time to rotate the filter in milliseconds'),  
   backup: Joi.boolean()
+    .strict()
     .description('Enable backup filter'),
   backupTime: Joi.number()
+    .positive()
     .integer()
-    .min(1000)
+    .when('backup', { not: Joi.exist(), then: Joi.forbidden() })
+    .when('backup', { is: false, then: Joi.forbidden() })
     .less(Joi.ref('rotateTime'))
-    .when('backup', { is: true, then: Joi.required() })
     .description('Time to rotate the backup filter in milliseconds'),
 });  
 

@@ -82,12 +82,18 @@ function findRevokerInstance(revokerId, logger) {
 }
 
 /**
+ * Server Global variable
+ * @type {grpc.Server | null}
+ **/
+let server = null;
+
+/**
  * Starts the gRPC server.
  * @param {string} port - The port on which the server should listen.
  * @returns {void}
  */
 export function startServer(port, logger) {
-  const server = new grpc.Server();
+  server = new grpc.Server();
 
   /**
    * Implements the gRPC RevokerAdmin service.
@@ -290,5 +296,35 @@ export function startServer(port, logger) {
       return;
     }
     logger.info(`gRPC server listening on ${port}`);
+  });
+}
+
+ /**
+   * Gracefully shutdown the gRPC server
+   * @param {number} [timeout=5000] Timeout in ms to force shutdown
+   * @returns {Promise<void>} 
+   */
+ export async function stopServer (timeout = 5000) {
+  if (!server) {
+    return;
+  }
+
+  return new Promise((resolve) => {
+    // Create timeout to force shutdown
+    const forceShutdown = setTimeout(() => {
+      if (server) {
+        server.forceShutdown();
+      }
+      resolve();
+    }, timeout);
+
+    // Try graceful shutdown
+    if (server) server.tryShutdown(() => {
+      clearTimeout(forceShutdown);
+      forceShutdown.unref();
+      server = null;
+      console.log('gRPC server shutdown');
+      resolve();
+    });
   });
 }
