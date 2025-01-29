@@ -22,6 +22,7 @@ import './types.js';
 //  */
 
 import { BloomFilterManager } from "./Bloom-filter-manager.js";
+import { ValidationError, InternalError } from './errors.js';
 import throttle from "throttleit";
 import { stopServer, registerRevokerInstance, startServer } from "./grpc/std-server.js";
 import { revokerInputSchema } from "./Inputs-validation.js";
@@ -35,10 +36,14 @@ import { revokerInputSchema } from "./Inputs-validation.js";
    * @returns {void}
    */
 const logOrThrottle = (message, throttleFn, logger, isError = false) => {
-  if (process.env.NODE_ENV !== 'development') {
-    throttleFn(message);
-  } else {
-    logger[isError ? 'warn' : 'info'](message);
+  try {
+    if (process.env.NODE_ENV !== 'development') {
+      throttleFn(message);
+    } else {
+      logger[isError ? 'warn' : 'info'](message);
+    }
+  } catch (error) {
+    logger.error("Error in logOrThrottle:", error);
   }
 };
 
@@ -61,8 +66,7 @@ const createJWTMiddleware = (claimsToCheck, payloadKey, bloomFilterManager, logg
    */
   const validatePayload = (payload) => {
     if (!payload) {
-      logger.info("Missing JWT payload in request");
-      return false;
+      throw new ValidationError("Missing JWT payload in request");
     }
     return true;
   };
@@ -75,8 +79,7 @@ const createJWTMiddleware = (claimsToCheck, payloadKey, bloomFilterManager, logg
    */
   const validateClaim = (payload, claim) => {
     if (!payload[claim]) {
-      logger.info(`Missing ${claim} claim in JWT Payload`);
-      return false;
+      throw new ValidationError(`Missing ${claim} claim in JWT Payload`);
     }
 
     if (bloomFilterManager.has(`${claim}-${payload[claim]}`)) {
@@ -114,12 +117,19 @@ const createJWTMiddleware = (claimsToCheck, payloadKey, bloomFilterManager, logg
         });
       }
     } catch (error) {
-      // Handle unexpected errors (e.g., an error in the bloomFilterManager)
-      logger.error(`Unexpected error during JWT validation: ${error.message}`);
-      res.status(500).json({
-        error: "internal_error",
-        message: "An unexpected error occurred",
-      });
+      if (error instanceof ValidationError) {
+        logger.warn(`Validation error: ${error.message}`);
+        res.status(400).json({
+          error: "validation_error",
+          message: error.message,
+        });
+      } else {
+        logger.error(`Unexpected error during JWT validation: ${error.message}`);
+        res.status(500).json({
+          error: "internal_error",
+          message: "An unexpected error occurred",
+        });
+      }
     }
   };
 };
@@ -145,8 +155,7 @@ const createOpaqueMiddleware = (header, bloomFilterManager, logger, throttleOpaq
     const headerValue = req.headers[normalizedHeader];
     
     if (!headerValue) {
-      logger.info(`Missing header: ${normalizedHeader}`);
-      return '';
+      throw new ValidationError(`Missing header: ${normalizedHeader}`);
     }
 
     if (normalizedHeader === "authorization") {
@@ -155,8 +164,7 @@ const createOpaqueMiddleware = (header, bloomFilterManager, logger, throttleOpaq
       const [type, token] = authHeader.split(" ");
       
       if (!token || type.toLowerCase() !== "bearer") {
-        logger.info('Invalid authorization header');
-        return '';
+        throw new ValidationError('Invalid authorization header format. Expected "Bearer <token>"');
       }
       return token;
     }
@@ -189,7 +197,7 @@ const createOpaqueMiddleware = (header, bloomFilterManager, logger, throttleOpaq
     try {
       const normalizedHeader = header.toLowerCase();
       const token = extractToken(req, normalizedHeader);
-      if (token !== '' && validateToken(token, bloomFilterManager)) {
+      if (validateToken(token, bloomFilterManager)) {
         next();
       } else {
         res.status(401).json({
@@ -198,12 +206,19 @@ const createOpaqueMiddleware = (header, bloomFilterManager, logger, throttleOpaq
         });
       }
     } catch (error) {
-      // Handle unexpected errors (e.g., an error in the bloomFilterManager)
-      logger.error(`Unexpected error during JWT validation: ${error.message}`);
-      res.status(500).json({
-        error: "internal_error",
-        message: "An unexpected error occurred",
-      });
+      if (error instanceof ValidationError) {
+        logger.warn(`Validation error: ${error.message}`);
+        res.status(400).json({
+          error: "validation_error",
+          message: error.message
+        });
+      } else {
+        logger.error(`Unexpected error during opaque token validation: ${error.message}`);
+        res.status(500).json({
+          error: "internal_error",
+          message: "An unexpected error occurred",
+        });
+      }
     }
   };
 };
@@ -264,14 +279,18 @@ export class Revoker {
 
     const { error } = revokerInputSchema.validate(config);
     if (error) {
-      throw new Error(`Invalid input: ${error.message}`);
+      throw new ValidationError(`Invalid input: ${error.message}`);
     }
 
     const {
       id, claimsToCheck, payloadKey, opaqueHeader, grpcEnabled = false, grpcPort, logger = console, filter
     } = config;   
 
-    this.bloomFilterManager = new BloomFilterManager({ id, logger, ...filter });
+    try {
+      this.bloomFilterManager = new BloomFilterManager({ id, logger, ...filter });
+    } catch (error) {
+      throw new InternalError(`Failed to initialize BloomFilterManager: ${error.message}`);
+    }
 
     const throttleLog = throttle((message) => logger.info(message), 60000);
 
@@ -287,15 +306,15 @@ export class Revoker {
         throttleLog
       );
     } else if (opaqueHeader) {
-        this.middleware = createOpaqueMiddleware(
-          opaqueHeader,
-          this.bloomFilterManager,
-          logger,
-          throttleLog,
-        );
+      this.middleware = createOpaqueMiddleware(
+        opaqueHeader,
+        this.bloomFilterManager,
+        logger,
+        throttleLog,
+      );
     } else {
       this.bloomFilterManager.destroy();
-      throw new Error("claimsToCheck or opaqueHeader must be provided");
+      throw new ValidationError("claimsToCheck or opaqueHeader must be provided");
     }
 
     this.grpcEnabled = grpcEnabled;
@@ -341,6 +360,7 @@ export class Revoker {
     try {
       this.bloomFilterManager.add(filterItem);
     } catch (error) {
+      this.logger.error('Error in Revoker.add:', error);
       throw error;
     }
   }
@@ -360,7 +380,12 @@ export class Revoker {
       throw new Error("Bloom filter manager not initialized");
     }
   
-    return this.bloomFilterManager.has(item);
+    try {
+      return this.bloomFilterManager.has(item);
+    } catch (error) {
+      this.logger.error('Error in Revoker.has:', error);
+      throw error;
+    }
   }
 
   /**
@@ -383,48 +408,71 @@ export class Revoker {
   /**
    * Resets and restore the Bloom filter.
    * @returns {Promise<void>}
+   * @throws {Error} If an error occurs during the reset or restoration.
    */
   async resetAndRestore() {
     if (this.grpcEnabled) {
       throw new Error("gRPC is enabled, use the gRPC method instead");
     }
-    
+
     if (!this.bloomFilterManager) {
       throw new Error("Bloom filter manager not initialized");
     }
-  
-    await this.bloomFilterManager.resetAndRestore();
+
+    try {
+      await this.bloomFilterManager.resetAndRestore();
+      this.logger.info("Bloom filter has been reset and restored successfully.");
+    } catch (error) {
+      this.logger.error('Error in Revoker.resetAndRestore:', error);
+      throw error;
+    }
   }
 
   /**
-   * Resets the Bloom filter anc clears data.
+   * Resets the Bloom filter and clears data.
    * @returns {Promise<void>}
+   * @throws {Error} If an error occurs during the reset or data clearance.
    */
   async resetAndClearData() {
     if (this.grpcEnabled) {
       throw new Error("gRPC is enabled, use the gRPC method instead");
     }
-    
+
     if (!this.bloomFilterManager) {
       throw new Error("Bloom filter manager not initialized");
     }
-  
-    await this.bloomFilterManager.resetAndClearData();
+
+    try {
+      await this.bloomFilterManager.resetAndClearData();
+      this.logger.info("Bloom filter has been reset and data cleared successfully.");
+    } catch (error) {
+      this.logger.error('Error in revoker.resetAndClearData:', error);
+      throw error;
+    }
   }
+
   /**
    * Destroys the Bloom filter manager.
    * @returns {Promise<void>}
    */
   async destroy() {
-    if (this.grpcEnabled) {
-      await stopServer();
-    }
-    if (this.bloomFilterManager) {
-      this.bloomFilterManager.destroy();
-      this.middleware = null;
-      this.bloomFilterManager = null;
-    } else {
-      this.logger.warn("Bloom filter manager already destroyed");
+    try {
+      if (this.grpcEnabled && Revoker.grpcServerStarted) {
+        this.logger.info("Stopping gRPC server");
+        await stopServer(this.logger);
+        this.grpcEnabled = false;
+        Revoker.grpcServerStarted = false;
+      }
+      if (this.bloomFilterManager) {
+        this.bloomFilterManager.destroy();
+        this.middleware = null;
+        this.bloomFilterManager = null;
+      } else {
+        this.logger.warn("Bloom filter manager already destroyed");
+      }
+    } catch (error) {
+      this.logger.error("Error during Revoker destruction:", error);
+      throw new InternalError(`Failed to destroy Revoker: ${error.message}`);
     }
   }
 }

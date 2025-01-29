@@ -31,8 +31,8 @@ const revokerProto = protoDescriptor.revoker;
  */
 
 // Use an object to store Revoker instances
-/** @type {Map<string, Revoker>} */
-const revokerInstances = new Map();
+/** @type {Map<string, Revoker> | null} */
+let revokerInstances = new Map();
 
 /**
  * Registers a Revoker instance for management by gRPC.
@@ -40,8 +40,12 @@ const revokerInstances = new Map();
  * @returns {void}
  */
 export function registerRevokerInstance(revokerInstance) {
-  revokerInstances.set(revokerInstance.id, revokerInstance);
-  revokerInstance.logger.info(`Revoker instance ${revokerInstance.id} registered`);
+  if (revokerInstances) {
+    revokerInstances.set(revokerInstance.id, revokerInstance);
+    revokerInstance.logger.info(`Revoker instance ${revokerInstance.id} registered`);
+  } else {
+    throw new Error('Revoker instances map is not initialized');
+  }
 }
 
 /**
@@ -50,7 +54,11 @@ export function registerRevokerInstance(revokerInstance) {
  * @returns {void}
  */
 export function unregisterRevokerInstance(revokerId) {
-  revokerInstances.delete(revokerId);
+  if (revokerInstances) {
+    revokerInstances.delete(revokerId);
+  } else {
+    throw new Error('Revoker instances map is not initialized');
+  }
 }
 
 // Define error message because it is used in multiple places
@@ -73,7 +81,7 @@ function hasNonNullableBloomFilterManager(revokerInstance) {
  * @returns {(Revoker & { bloomFilterManager: NonNullable<Revoker['bloomFilterManager']> }) | undefined}
  */
 function findRevokerInstance(revokerId, logger) {
-  const revokerInstance = revokerInstances.get(revokerId);
+  const revokerInstance = revokerInstances ? revokerInstances.get(revokerId) : undefined;
   if (!hasNonNullableBloomFilterManager(revokerInstance)) {
     logger.error(REVOKER_OR_FILTER_NOT_FOUND_MSG);
     return undefined;
@@ -84,12 +92,14 @@ function findRevokerInstance(revokerId, logger) {
 /**
  * Server Global variable
  * @type {grpc.Server | null}
+ * @private
  **/
 let server = null;
 
 /**
  * Starts the gRPC server.
  * @param {string} port - The port on which the server should listen.
+ * @param {GenericLogger} logger - The logger instance.
  * @returns {void}
  */
 export function startServer(port, logger) {
@@ -245,32 +255,6 @@ export function startServer(port, logger) {
       });
     },
     /**
-     * Destroys a Revoker instance.
-     * @param {grpc.ServerUnaryCall<{ revokerId: string }, { code: number, success: boolean, message: string }>} call - The gRPC call object for the Destroy method.
-     * @param {grpc.sendUnaryData<{ code: number, success: boolean, message: string }>} callback - The gRPC callback function for the Destroy method.
-     * @returns {void}
-     */
-    Destroy: (call, callback) => {
-      const { revokerId } = call.request;
-      const revokerInstance = findRevokerInstance(revokerId, logger);
-      
-      if (!revokerInstance) {
-        return callback({ 
-          code: grpc.status.NOT_FOUND, 
-          message: REVOKER_OR_FILTER_NOT_FOUND_MSG
-        });
-      }
-
-      try {
-        revokerInstance.destroy();
-        unregisterRevokerInstance(revokerId);
-        callback(null, { code: grpc.status.OK, success: true, message: 'Revoker destroyed' });
-      } catch (error) {
-        logger.error(`Error destroying revoker ${revokerId}: ${error.message}`);
-        callback({ code: grpc.status.INTERNAL, message: error.message });
-      }
-    },
-    /**
      * Lists all Revoker instances.
      * @param {grpc.ServerUnaryCall<null, { code: number, revokerIds: string[] }>} call - The gRPC call object for the ListRevokers method.
      * @param {grpc.sendUnaryData<{ code: number, revokerIds: string[] }>} callback - The gRPC callback function for the ListRevokers method.
@@ -278,7 +262,7 @@ export function startServer(port, logger) {
      */
     ListRevokers: (call, callback) => {
       try {
-        const revokerIds = Array.from(revokerInstances.keys());
+        const revokerIds = revokerInstances ? Array.from(revokerInstances.keys()) : [];
         callback(null, { code: grpc.status.OK, revokerIds });
       } catch (error) {
         console.error(`Error listing revokers: ${error.message}`);
@@ -301,30 +285,37 @@ export function startServer(port, logger) {
 
  /**
    * Gracefully shutdown the gRPC server
+   * @param {GenericLogger} logger - The logger instance
    * @param {number} [timeout=5000] Timeout in ms to force shutdown
    * @returns {Promise<void>} 
    */
- export async function stopServer (timeout = 5000) {
-  if (!server) {
-    return;
-  }
-
-  return new Promise((resolve) => {
-    // Create timeout to force shutdown
-    const forceShutdown = setTimeout(() => {
-      if (server) {
-        server.forceShutdown();
-      }
-      resolve();
-    }, timeout);
-
-    // Try graceful shutdown
-    if (server) server.tryShutdown(() => {
-      clearTimeout(forceShutdown);
-      forceShutdown.unref();
-      server = null;
-      console.log('gRPC server shutdown');
-      resolve();
+ export async function stopServer(logger =console, timeout = 5000) {
+  if (server) {
+    if (revokerInstances) {
+      revokerInstances.clear();
+      revokerInstances = null;
+    }
+    
+    const currentServer = server;
+    return new Promise((resolve) => {
+      const forceShutdown = setTimeout(() => {
+        if (currentServer === server) {
+          server.forceShutdown();
+          server = null;
+        }
+        logger.info('Grpc server forcefully shutdown');
+        resolve();
+      }, timeout);
+  
+      currentServer.tryShutdown(() => {
+        clearTimeout(forceShutdown);
+        if (currentServer === server) {
+          server = null;
+        }
+        logger.info('Grpc server gracefully shutdown');
+        resolve();
+      });
     });
-  });
+  }
+  return Promise.resolve();
 }

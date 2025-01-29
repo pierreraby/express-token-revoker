@@ -29,6 +29,8 @@ const opaqueConfig = {
   id: "opaqueRevoker",
   opaqueHeader: "Authorization", // adding header where to check opaque token, maybe 'X-Auth-Token', etc
   logger,
+  grpcEnabled: true,
+  grpcPort: "50051",
   filter: {
     numItems: 1000000,
     fpRate: 0.000001,

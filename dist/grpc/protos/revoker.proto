@@ -10,7 +10,6 @@ service RevokerAdmin {
   rpc GetMetrics (GetMetricsRequest) returns (GetMetricsResponse) {}
   rpc ResetAndRestore (ResetAndRestoreRequest) returns (ResetAndRestoreResponse) {}
   rpc ResetAndClearData (ResetAndClearDataRequest) returns (ResetAndClearDataResponse) {}
-  rpc Destroy (DestroyRequest) returns (DestroyResponse) {}
   rpc ListRevokers (ListRevokersRequest) returns (ListRevokersResponse) {} 
 }
 
@@ -71,15 +70,6 @@ message ResetAndClearDataRequest {
 }
 
 message ResetAndClearDataResponse {
-  bool success = 1;
-  string message = 2;
-}
-
-message DestroyRequest {
-  string revokerId = 1;
-}
-
-message DestroyResponse {
   bool success = 1;
   string message = 2;
 }

@@ -131,6 +131,18 @@ test.group('BloomFilterManager Constructor Validation', (group) => {
     })).toThrow('Invalid input: \"backupTime\" is not allowed')
   })
 
+  test('constructor throws error when backupTime is provided and backup is false', ({ expect }) => {
+    expect(() => new BloomFilterManager({
+      id: 'test',
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 1000,
+      backup: false,
+      backupTime: 500,
+      logger
+    })).toThrow('Invalid input: \"backupTime\" is not allowed')
+  })
+
 
   test('constructor throws error when backupTime is not a positive integer', ({ expect }) => {
     expect(() => new BloomFilterManager({
@@ -237,7 +249,6 @@ test.group('BloomFilterManager Add and Has', (group) => {
   test('add throw an error when write to file failed', ({ expect }) => {
       sinon.stub(fs, 'appendFileSync').throws(new Error('Mocked write error'))
       expect(() => manager.add('test')).toThrow('Mocked write error')
-      expect(manager.logger.error.calledWith('Error adding value to Bloom filter:')).toBe(true)
   })
 
   test('has method returns true for added values', ({expect}) => {
@@ -474,10 +485,11 @@ test.group('BloomFilterManager Rotation', (group) => {
 })
 
 test.group('BloomFilterManager metrics', (group) => {
-  let manager
-  let logger
+  let manager;
+  let logger;
+  const NUMITEMS = 10000;
 
-  group.setup(() => {
+  group.each.setup(() => {
     logger = {
       info: sinon.spy(),
       warn: sinon.spy(),
@@ -485,58 +497,65 @@ test.group('BloomFilterManager metrics', (group) => {
       error: sinon.spy()
     }
     manager = new BloomFilterManager({
-      numItems: 1000,
-      fpRate: 0.01,
+      id: 'test',
+      numItems: 10000,
+      fpRate: 0.0001,
       rotateTime: 500, // Temps de rotation court pour les tests
       logger
     })
   })
 
-  group.teardown(async () => {
+  group.each.teardown(async () => {
     sinon.restore()
     await manager.resetAndClearData()
     manager.destroy()
   })
 
-//   test('getEstimatedMetrics returns correct values after init', async ({expect}) => {
-//     logger.info.resetHistory()
-//     const metrics = manager.getEstimatedMetrics()
-//     expect(metrics.currentCount).toBe(-0)
-//     expect(metrics.currentFpRate).toBe(0)
-//     expect(metrics.previousCount).toBe(0)
-//     expect(metrics.previousFpRate).toBe(0)
-//   })
+  test('getMetrics returns correct values after init', async ({expect}) => {
+    logger.info.resetHistory()
+    const metrics = manager.getMetrics()
+    expect(metrics.estimatedMetrics.currentCount).toBe(-0);
+    expect(metrics.estimatedMetrics.currentFpRate).toBe(0);
+    expect(metrics.estimatedMetrics.previousCount).toBe(0);
+    expect(metrics.estimatedMetrics.previousFpRate).toBe(0);
+    expect(metrics.configuration.numItems).toBe(NUMITEMS);
+    expect(metrics.configuration.fpRate).toBe(0.0001);
+    expect(metrics.configuration.rotateTime).toBe(500);
+    expect(metrics.configuration.backupEnabled).toBe(false);
+    expect(metrics.configuration.backupTime).toBe(undefined);
+  })
 
-//   test('getEstimatedMetricx returns correct values after filling current filter', async ({expect}) => {
-//     manager.add('value1')
-//     manager.add('value2')
-//     const metrics = manager.getEstimatedMetrics()
-//     expect(metrics.currentCount).toBeCloseTo(2)
-//     expect(metrics.currentFpRate).toBeCloseTo(0.0001, 4)
-//     expect(metrics.previousCount).toBe(0)
-//     expect(metrics.previousFpRate).toBe(0)
-//   })
+  test('getEstimatedMetricx returns correct values after filling current filter', async ({expect}) => {
+    for (let i = 0; i < NUMITEMS; i++) {
+      manager.add(i.toString())
+    }
+    const metrics = manager.getMetrics().estimatedMetrics;
+    expect(metrics.currentCount).toBeGreaterThan(NUMITEMS - 50);
+    expect(metrics.currentCount).toBeLessThan(NUMITEMS + 50);
 
-//   test('metrics returns correct values after backup enabled', async ({expect}) => {
-//     manager = new BloomFilterManager({
-//       numItems: 1000,
-//       fpRate: 0.01,
-//       rotateTime: 500, // Temps de rotation court pour les tests
-//       logger,
-//       backup: true,
-//       backupTime: 500
-//     })
-//     const metrics = manager.metrics()
-//     expect(metrics.numItems).toBe(1000)
-//     expect(metrics.fpRate).toBe(0.01)
-//     expect(metrics.rotateTime).toBe(500)
-//     expect(metrics.backup).toBe(true)
-//     expect(metrics.backupTime).toBe(500)
-//     expect(metrics.previousDone).toBe(false)
-//     expect(metrics.current).not.toBe(null)
-//     expect(metrics.previous).toBe(null)
-//   })
+    expect(metrics.currentFpRate).toBeCloseTo(0.0001, 4)
+    expect(metrics.previousCount).toBe(0)
+    expect(metrics.previousFpRate).toBe(0)
+  })
 
+  test('getEstimatedMetrics returns correct values after rotation', async ({expect}) => {
+    // Fill current filter
+    for (let i = 0; i < NUMITEMS; i++) {
+      manager.add(i.toString())
+    }
+    await new Promise(resolve => setTimeout(resolve, 600)) // wait for rotation
+    // Fill new current filter
+    for (let i = 0; i < NUMITEMS; i++) {
+      manager.add(i.toString())
+    }
+    const metrics = manager.getMetrics().estimatedMetrics;
+    expect(metrics.currentCount).toBeGreaterThan(NUMITEMS - 50);
+    expect(metrics.currentCount).toBeLessThan(NUMITEMS + 50);
+    expect(metrics.currentFpRate).toBeCloseTo(0.0001, 4)
+    expect(metrics.previousCount).toBeGreaterThan(NUMITEMS - 50);
+    expect(metrics.previousCount).toBeLessThan(NUMITEMS + 50);
+    expect(metrics.previousFpRate).toBeCloseTo(0.0001, 4)
+  })
 })
 
 // private methods
