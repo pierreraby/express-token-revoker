@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2018, Jason Davies
+ * Copyright (c) 2018, Jason Davies : https://github.com/jasondavies/bloomfilter.js
  * Copyright (c) 2025, Pierre Raby
  * 
  * Minor modifications made by Pierre Raby: use of Class syntax and JSDoc annotations.
