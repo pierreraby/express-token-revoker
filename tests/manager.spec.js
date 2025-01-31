@@ -199,6 +199,20 @@ test.group('BloomFilterManager Constructor Validation', (group) => {
       logger: { info: sinon.spy(), warn: sinon.spy() } // missing required methods
     })).toThrow('Invalid input: \"logger.error\" is required')
   });
+
+  // test('constructor throws error if init method fails', ({expect}) => {
+  //   sinon.stub(fs, 'mkdirSync').throws(new Error('Mocked write error'))
+  //   expect(() => new BloomFilterManager({
+  //     id: 'test',
+  //     numItems: 1000,
+  //     fpRate: 0.01,
+  //     rotateTime: 1000,
+  //     logger
+  //   })).toThrow('Error accessing or creating backup directory: Mocked read dir error}')
+
+  //   initStub.restore()
+  // });
+
 })
 
 test.group('BloomFilterManager Add and Has', (group) => {

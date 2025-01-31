@@ -2,6 +2,8 @@ import { test } from '@japa/runner'
 import sinon from 'sinon'
 import { Revoker } from '../dist/index.js'
 import { BloomFilterManager } from '../dist/Bloom-filter-manager.js'
+import throttle from 'throttleit'
+import { createJWTMiddleware, createOpaqueMiddleware } from '#dist/createMiddlewares.js'
 
 test.group('Middleware Tests', (group) => {  
   let logger
@@ -455,6 +457,58 @@ test.group('Middleware Tests', (group) => {
     await revoker.destroy()
   })
 
+  test('logOrThrottle logs in development mode', async ({ expect }) => {
+    process.env.NODE_ENV = 'development'
+    const throttleStub = sinon.stub(throttle, 'default').returns(() => {})
+    const loggerInfoStub = sinon.stub(logger, 'info')
+
+    // Accédez à la fonction non exportée via l'objet du module
+    indexModule.logOrThrottle('test message', throttleStub, logger)
+
+    expect(loggerInfoStub.calledOnceWithExactly('test message')).toBe(true)
+    expect(throttleStub.called).toBe(false)
+    process.env.NODE_ENV = 'test'
+  })
+
+  test('logOrThrottle throttles in non-development mode', async ({ expect }) => {
+    process.env.NODE_ENV = 'production'
+    const throttleStub = sinon.stub(throttle, 'default').returns(() => {})
+    const loggerInfoStub = sinon.stub(logger, 'info')
+
+    indexModule.logOrThrottle('test message', throttleStub, logger)
+
+    expect(throttleStub.calledOnceWithExactly('test message')).toBe(true)
+    expect(loggerInfoStub.called).toBe(false)
+    process.env.NODE_ENV = 'test'
+  })
+
+  test('logOrThrottle logs error when throttleFn throws', async ({ expect }) => {
+    process.env.NODE_ENV = 'production'
+    const error = new Error('Throttle error')
+    const throttleStub = sinon.stub(throttle, 'default').throws(error)
+    const loggerErrorStub = sinon.stub(logger, 'error')
+
+    indexModule.logOrThrottle('test message', throttleStub, logger)
+
+    expect(loggerErrorStub.calledOnce).toBe(true)
+    expect(loggerErrorStub.firstCall.args[0]).toBe('Error in logOrThrottle:')
+    expect(loggerErrorStub.firstCall.args[1]).toEqual(error)
+    process.env.NODE_ENV = 'test'
+  })
+
+  test('logOrThrottle logs warning in development mode for error messages', async ({ expect }) => {
+    process.env.NODE_ENV = 'development'
+    const throttleStub = sinon.stub(throttle, 'default').returns(() => {})
+    const loggerWarnStub = sinon.stub(logger, 'warn')
+
+    indexModule.logOrThrottle('error message', throttleStub, logger, true)
+
+    expect(loggerWarnStub.calledOnceWithExactly('error message')).toBe(true)
+    expect(throttleStub.called).toBe(false)
+    process.env.NODE_ENV = 'test'
+  })
+
+
 //   test('JWT Middleware - throttleJWT is called in non-development mode with warn message', async ({ expect }) => {
 //     process.env.NODE_ENV = 'production';
 //     const revoker = new Revoker({
@@ -793,6 +847,22 @@ test.group('Revoker Constructor Validation Tests', (group) => {
     })).toThrow('Invalid input: \"grpcPort\" must be a string')
   });
 
+    test('Constructor throws error if BloomFilterManager initialization fails', async ({ expect }) => {
+    // const error = new Error('Initialization failed')
+    // sinon.stub(BloomFilterManager.prototype, 'constructor').throws(error)
+    expect(() => new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        // numItems: 1000, <- Missing required parameter, should throw an error
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })).toThrow('Failed to initialize BloomFilterManager: Invalid input: \"numItems\" is required')
+  })
+
   test('Constructor not throws error if grpcEnabled is false and grpcPort is not provided', async ({ expect }) => {
     let revoker;
     expect(() => revoker = new Revoker({
@@ -842,12 +912,102 @@ test.group('Revoker Constructor Validation Tests', (group) => {
     }).not.toThrow())
   });
 
+  test('Constructor initializes BloomFilterManager with correct parameters', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000,
+        backup: true,
+        backupTime: 1000
+      }
+    })
+
+    expect(revoker.bloomFilterManager.id).toBe('test')
+    expect(revoker.bloomFilterManager.numItems).toBe(1000)
+    expect(revoker.bloomFilterManager.fpRate).toBe(0.01)
+    expect(revoker.bloomFilterManager.rotateTime).toBe(2000)
+    expect(revoker.bloomFilterManager.backupEnabled).toBe(true)
+    expect(revoker.bloomFilterManager.backupTime).toBe(1000)
+    await revoker.destroy()
+  })
+
+  // test('Constructor initializes throttleLog with correct parameters', async ({ expect }) => {
+  //   const throttleStub = sinon.stub(throttle, 'default').returns(() => {})
+  //   const revoker = new Revoker({
+  //     id: 'test',
+  //     claimsToCheck: ['claim1'],
+  //     payloadKey: 'token',
+  //     logger,
+  //     filter: {
+  //       numItems: 1000,
+  //       fpRate: 0.01,
+  //       rotateTime: 2000
+  //     }
+  //   })
+
+  //   expect(throttleStub.calledOnce).toBe(true)
+  //   expect(throttleStub.firstCall.args[1]).toBe(60000)
+  //   await revoker.destroy()
+  // })
+
+  // test('Constructor initializes middleware with correct parameters for JWT', async ({ expect }) => {
+  //   // const createJWTMiddlewareStub = sinon.stub().returns(() => {})
+  //   // sinon.replace(global, 'createJWTMiddleware', createJWTMiddlewareStub)
+  //   const createJWTMiddlewareSpy = sinon.spy(createJWTMiddleware)
+  //   const revoker = new Revoker({
+  //     id: 'test',
+  //     claimsToCheck: ['claim1'],
+  //     payloadKey: 'token',
+  //     logger,
+  //     filter: {
+  //       numItems: 1000,
+  //       fpRate: 0.01,
+  //       rotateTime: 2000
+  //     }
+  //   })
+  //   console.log(createJWTMiddlewareSpy.args)
+  //   expect(createJWTMiddlewareSpy.calledOnce).toBe(true)
+  //   expect(createJWTMiddlewareSpy.firstCall.args[0]).toEqual(['claim1'])
+  //   expect(createJWTMiddlewareSpy.firstCall.args[1]).toBe('token')
+  //   expect(createJWTMiddlewareSpy.firstCall.args[2]).toBe(revoker.bloomFilterManager)
+  //   expect(createJWTMiddlewareSpy.firstCall.args[3]).toBe(logger)
+  //   expect(typeof createJWTMiddlewareSpy.firstCall.args[4]).toBe('function')
+  //   await revoker.destroy()
+  // })
+
+  // test('Constructor initializes middleware with correct parameters for Opaque', async ({ expect }) => {
+  //   const createOpaqueMiddlewareStub = sinon.stub().returns(() => {})
+  //   sinon.replace(global, 'createOpaqueMiddleware', createOpaqueMiddlewareStub)
+  //   const revoker = new Revoker({
+  //     id: 'test',
+  //     opaqueHeader: 'Authorization',
+  //     logger,
+  //     filter: {
+  //       numItems: 1000,
+  //       fpRate: 0.01,
+  //       rotateTime: 2000
+  //     }
+  //   })
+
+  //   expect(createOpaqueMiddlewareStub.calledOnce).toBe(true)
+  //   expect(createOpaqueMiddlewareStub.firstCall.args[0]).toBe('Authorization')
+  //   expect(createOpaqueMiddlewareStub.firstCall.args[1]).toBe(revoker.bloomFilterManager)
+  //   expect(createOpaqueMiddlewareStub.firstCall.args[2]).toBe(logger)
+  //   expect(typeof createOpaqueMiddlewareStub.firstCall.args[3]).toBe('function')
+  //   await revoker.destroy()
+  // })
+
 })
 
 // Tests de la classe Revoker
 test.group('Revoker Class Tests', (group) => {
   let logger
-  let destroySpy
+  // let destroySpy
 
   group.each.setup(() => {
     logger = {
@@ -856,12 +1016,13 @@ test.group('Revoker Class Tests', (group) => {
       debug: sinon.spy(),
       error: sinon.spy()
     }
-    destroySpy = sinon.spy(BloomFilterManager.prototype, 'destroy')
+    // destroySpy = sinon.spy(BloomFilterManager.prototype, 'destroy')
   })
 
 
   group.each.teardown(() => {
-    destroySpy.restore()
+    // destroySpy.restore();
+    sinon.restore();
   })
 
   // test('constructor initializes throttle functions properly', async ({ expect }) => {
@@ -920,7 +1081,26 @@ test.group('Revoker Class Tests', (group) => {
     await revoker.destroy()
   })
 
-  test('destroy method handles multiple calls safely', async ({ expect }) => {
+  test('add throws error when gRPC is enabled', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
+      grpcEnabled: true,
+      grpcPort: '50051'
+    })
+
+    expect(() => revoker.add('test')).toThrow('gRPC is enabled, use the gRPC method instead')
+    await revoker.destroy()
+  })
+
+  test('add calls bloomFilterManager.add and throws error if add fails', async ({ expect }) => {
     const revoker = new Revoker({
       id: 'test',
       claimsToCheck: ['claim1'],
@@ -933,11 +1113,209 @@ test.group('Revoker Class Tests', (group) => {
       }
     })
 
+    const addStub = sinon.stub(revoker.bloomFilterManager, 'add').throws(new Error('Add failed'))
+    expect(() => revoker.add('test')).toThrow('Add failed')
+    expect(addStub.calledOnceWithExactly('test')).toBe(true)
     await revoker.destroy()
-    expect(async() => await revoker.destroy()).not.toThrow()
-    expect(revoker.bloomFilterManager).toBeNull()
   })
 
+  test('has throws error when gRPC is enabled', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
+      grpcEnabled: true,
+      grpcPort: '50051'
+    })
+
+    expect(() => revoker.has('test')).toThrow('gRPC is enabled, use the gRPC method instead')
+    await revoker.destroy()
+  })
+
+  test('has calls bloomFilterManager.has and throws error if has fails', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })
+
+    const hasStub = sinon.stub(revoker.bloomFilterManager, 'has').throws(new Error('Has failed'))
+    expect(() => revoker.has('test')).toThrow('Has failed')
+    expect(hasStub.calledOnceWithExactly('test')).toBe(true)
+    await revoker.destroy()
+  })
+
+  test('getMetrics calls bloomFilterManager.getMetrics', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })
+
+    const getMetricsStub = sinon.stub(revoker.bloomFilterManager, 'getMetrics').returns({ test: 'metrics' })
+    const metrics = revoker.getMetrics()
+    expect(metrics).toEqual({ test: 'metrics' })
+    expect(getMetricsStub.calledOnce).toBe(true)
+    await revoker.destroy()
+  })
+
+  test('getMetrics throws error when gRPC is enabled', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
+      grpcEnabled: true,
+      grpcPort: '50051'
+    })
+
+    expect(() => revoker.getMetrics()).toThrow('gRPC is enabled, use the gRPC method instead')
+    await revoker.destroy()
+  })
+
+  test('resetAndRestore throws error when gRPC is enabled', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
+      grpcEnabled: true,
+      grpcPort: '50051'
+    })
+
+    await expect(revoker.resetAndRestore()).rejects.toThrow('gRPC is enabled, use the gRPC method instead')
+    await revoker.destroy()
+  })
+
+  test('resetAndRestore calls bloomFilterManager.resetAndRestore and logs error if resetAndRestore fails', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })
+
+    const resetAndRestoreStub = sinon.stub(revoker.bloomFilterManager, 'resetAndRestore').rejects(new Error('Reset failed'))
+    await expect(revoker.resetAndRestore()).rejects.toThrow('Reset failed')
+    expect(resetAndRestoreStub.calledOnce).toBe(true)
+    expect(logger.error.calledOnce).toBe(true)
+    expect(logger.error.firstCall.args[0]).toBe('Error in Revoker.resetAndRestore:')
+    expect(logger.error.firstCall.args[1].message).toBe('Reset failed')
+    await revoker.destroy()
+  })
+
+  test('resetAndClearData throws error when gRPC is enabled', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
+      grpcEnabled: true,
+      grpcPort: '50051'
+    })
+
+    await expect(revoker.resetAndClearData()).rejects.toThrow('gRPC is enabled, use the gRPC method instead')
+    await revoker.destroy()
+  })
+
+  test('resetAndClearData calls bloomFilterManager.resetAndClearData and logs error if resetAndClearData fails', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })
+
+    const resetAndClearDataStub = sinon.stub(revoker.bloomFilterManager, 'resetAndClearData').rejects(new Error('Reset failed'))
+    await expect(revoker.resetAndClearData()).rejects.toThrow('Reset failed')
+    expect(resetAndClearDataStub.calledOnce).toBe(true)
+    expect(logger.error.calledOnce).toBe(true)
+    expect(logger.error.firstCall.args[0]).toBe('Error in revoker.resetAndClearData:')
+    expect(logger.error.firstCall.args[1].message).toBe('Reset failed')
+    await revoker.destroy()
+  })
+
+  test('destroy logs error if destroy fails', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })
+
+    const destroyStub = sinon.stub(revoker.bloomFilterManager, 'destroy').throws(new Error('Destroy failed'))
+    await expect(revoker.destroy()).rejects.toThrow('Failed to destroy Revoker: Destroy failed')
+    expect(destroyStub.calledOnce).toBe(true)
+    expect(logger.error.calledOnce).toBe(true)
+    expect(logger.error.firstCall.args[0]).toBe('Error during Revoker destruction:')
+    expect(logger.error.firstCall.args[1].message).toBe('Destroy failed')
+  })
+
+  test('destroy logs warning if bloomFilterManager is already destroyed', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })
+
+    revoker.bloomFilterManager = null
+    await revoker.destroy()
+    expect(logger.warn.calledOnceWithExactly('Bloom filter manager already destroyed')).toBe(true)
+  })
 
 
   test('reset method handles null bloomFilterManager', async ({ expect }) => {
@@ -956,6 +1334,24 @@ test.group('Revoker Class Tests', (group) => {
     revoker.bloomFilterManager = null; // Simulate a null manager
     await expect(revoker.resetAndRestore()).rejects.toThrow('Bloom filter manager not initialized');
     await revoker.destroy()
+  })
+
+  test('destroy method handles multiple calls safely', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })
+
+    await revoker.destroy()
+    expect(async() => await revoker.destroy()).not.toThrow()
+    expect(revoker.bloomFilterManager).toBeNull()
   })
 
   test('destroy method handles multiple calls safely and sets bloomFilterManager to null', async ({ expect }) => {
@@ -977,6 +1373,7 @@ test.group('Revoker Class Tests', (group) => {
   })
 
   test('destroy method calls destroy on bloomFilterManager', async ({ expect }) => {
+    const destroySpy = sinon.spy(BloomFilterManager.prototype, 'destroy')
     const revoker = new Revoker({
       id: 'test',
       claimsToCheck: ['claim1'],
@@ -991,6 +1388,7 @@ test.group('Revoker Class Tests', (group) => {
 
     await revoker.destroy()
     expect(destroySpy.calledOnce).toBe(true)
+    destroySpy.restore()
   })
 
   test('getMiddleware throws error if middleware is not present', async ({ expect }) => {
