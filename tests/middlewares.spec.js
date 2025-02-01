@@ -11,11 +11,10 @@ test.group('Middleware Tests', (group) => {
   let next
   let manager
 
-  const throttleLog = throttle((message) => logger.info(message), 60000);
+  const throttleLog = throttle((message) => logger.info(message), 10);
 
   group.each.setup(() => {
     process.env.NODE_ENV = 'test'
-
     logger = {
       info: sinon.spy(),
       warn: sinon.spy(),
@@ -30,6 +29,7 @@ test.group('Middleware Tests', (group) => {
       fpRate: 0.0001,
       rotateTime: 1000
     })
+
     
     req = {}
     res = {
@@ -42,10 +42,12 @@ test.group('Middleware Tests', (group) => {
   group.each.teardown(async () => {
     sinon.restore() // Restore all Sinon stubs, fakes, and mocks.
     await manager.resetAndClearData();
-    manager.destroy()
+    manager.destroy();
   })
 
-  test('JWT Middleware - if in development mode, logger is called', async ({ expect }) => {
+
+
+  test('JWT Middleware - if in development mode, logger is called', ({ expect }) => {
     process.env.NODE_ENV = 'development'
 
     const middleware = createJWTMiddleware(['claim1'], 'token', manager, logger, throttleLog);
@@ -63,7 +65,7 @@ test.group('Middleware Tests', (group) => {
     expect(logger.error.called).toBe(false)
   })
 
-  test('JWT Middleware - missing payload', async ({ expect }) => {
+  test('JWT Middleware - missing payload', ({ expect }) => {
     const middleware = createJWTMiddleware(['claim1', 'claim2'], 'token', manager, logger, throttleLog);
     const req = {}
     
@@ -78,7 +80,7 @@ test.group('Middleware Tests', (group) => {
     })
   })
 
-  test('JWT Middleware - missing required claim', async ({ expect }) => {
+  test('JWT Middleware - missing required claim', ({ expect }) => {
     const middleware = createJWTMiddleware(['claim1', 'claim2'], 'token', manager, logger, throttleLog);
     req = {
       token: {
@@ -97,7 +99,7 @@ test.group('Middleware Tests', (group) => {
     })
   })
 
-  test('JWT Middleware - valid token with all required claims', async ({ expect }) => {
+  test('JWT Middleware - valid token with all required claims', ({ expect }) => {
     const middleware = createJWTMiddleware(['claim1', 'claim2'], 'token', manager, logger, throttleLog);
     req = {
       token: {
@@ -112,7 +114,7 @@ test.group('Middleware Tests', (group) => {
     expect(res.json.called).toBe(false)
   })
 
-  test('JWT Middleware - valid token with all required claims and blacklisted claim', async ({ expect }) => {
+  test('JWT Middleware - valid token with all required claims and blacklisted claim', ({ expect }) => {
     const middleware = createJWTMiddleware(['claim1', 'claim2'], 'token', manager, logger, throttleLog);
     req = {
       token: {
@@ -121,13 +123,6 @@ test.group('Middleware Tests', (group) => {
       }
     }
     manager.add('claim1-value1') // Blacklist the claim
-
-    req = {
-      token: {
-        claim1: 'value1',
-        claim2: 'value2'
-      }
-    }
 
     middleware(req, res, next)
 
@@ -140,7 +135,7 @@ test.group('Middleware Tests', (group) => {
     })
   })
 
-  test('JWT Middleware - log internal error', async ({ expect }) => {
+  test('JWT Middleware - log internal error', ({ expect }) => {
     const middleware = createJWTMiddleware(['claim1', 'claim2'], 'token', manager, logger, throttleLog);
 
     const error = new Error('Internal error')
@@ -163,7 +158,7 @@ test.group('Middleware Tests', (group) => {
     })
   })
 
-  test('Opaque Middleware - if in development mode, logger is called', async ({ expect }) => {
+  test('Opaque Middleware - if in development mode, logger is called', ({ expect }) => {
     process.env.NODE_ENV = 'development'
 
     const middleware = createOpaqueMiddleware('Authorization', manager, logger, throttleLog);
@@ -182,7 +177,7 @@ test.group('Middleware Tests', (group) => {
     expect(logger.error.called).toBe(false)
   })
 
-  test('Opaque Middleware - valid Authorization header', async ({ expect }) => {
+  test('Opaque Middleware - valid Authorization header', ({ expect }) => {
     const middleware = createOpaqueMiddleware('Authorization', manager, logger, throttleLog);
     req = {
       headers: {
@@ -197,7 +192,7 @@ test.group('Middleware Tests', (group) => {
     expect(res.json.called).toBe(false)
   })
 
-  test('Opaque Middleware - missing Authorization header', async ({ expect }) => {
+  test('Opaque Middleware - missing Authorization header', ({ expect }) => {
     const middleware = createOpaqueMiddleware('Authorization', manager, logger, throttleLog);
     
     req = {
@@ -219,7 +214,7 @@ test.group('Middleware Tests', (group) => {
     })
   })
 
-  test('Opaque Middleware - invalid Authorization header format', async ({ expect }) => {
+  test('Opaque Middleware - invalid Authorization header format', ({ expect }) => {
     const middleware = createOpaqueMiddleware('Authorization', manager, logger, throttleLog);
     req = {
       headers: {
@@ -242,7 +237,7 @@ test.group('Middleware Tests', (group) => {
     })
   })
 
-  test('Opaque Middleware - blacklisted token', async ({ expect }) => {
+  test('Opaque Middleware - blacklisted token', ({ expect }) => {
     const middleware = createOpaqueMiddleware('Authorization', manager, logger, throttleLog);
     
     const token = 'validToken'
@@ -265,7 +260,7 @@ test.group('Middleware Tests', (group) => {
     expect(res.json.calledOnce).toBe(true)
   })
 
-  test('Opaque Middleware - custom header validation', async ({ expect }) => {
+  test('Opaque Middleware - custom header validation', ({ expect }) => {
     const middleware = createOpaqueMiddleware('X-Custom-Token', manager, logger, throttleLog);
     req = {
       headers: {
@@ -280,7 +275,7 @@ test.group('Middleware Tests', (group) => {
     expect(res.json.called).toBe(false)
   })
 
-  test('Opaque Middleware - Missing custom header', async ({ expect }) => {
+  test('Opaque Middleware - Missing custom header', ({ expect }) => {
     const middleware = createOpaqueMiddleware('X-Custom-Token', manager, logger, throttleLog);
     req = {
       headers: {}
@@ -301,7 +296,7 @@ test.group('Middleware Tests', (group) => {
     })
   })
 
-  test('Opaque Middleware - log internal error', async ({ expect }) => {
+  test('Opaque Middleware - log internal error', ({ expect }) => {
     const middleware = createOpaqueMiddleware('Authorization', manager, logger, throttleLog);
 
     const error = new Error('Internal error')
@@ -323,70 +318,4 @@ test.group('Middleware Tests', (group) => {
       message: expect.stringContaining('An unexpected error occurred')
     })
   })
-
-
-
-
-//   test('JWT Middleware - throttleJWT is called in non-development mode with warn message', async ({ expect }) => {
-//     process.env.NODE_ENV = 'production';
-//     const revoker = new Revoker({
-//       numItems: 1000,
-//       fpRate: 0.01,
-//       rotateTime: 1000,
-//       claimsToCheck: ['claim1'],
-//       logger
-//     });
-
-//     const throttleJWTStub = sinon.stub(revoker, 'throttleJWT');
-  
-//     const middleware = revoker.getMiddleware();
-//     const next = sinon.spy();
-//     const req = { token: { claim1: 'value1' } }; // Blacklisted claim
-//     const res = { status: sinon.stub().returnsThis(), json: sinon.stub() };
-  
-//     revoker.add('claim1-value1'); // Blacklist the claim to trigger the throttled message
-  
-//     middleware(req, res, next);
-
-//     expect(throttleJWTStub.called).toBe(true);
-//     expect(throttleJWTStub.calledOnce).toBe(true);
-//     expect(throttleJWTStub.firstCall.args[0]).toBe('Token claim1 is blacklisted');
-//     expect(throttleJWTStub.firstCall.args[1]).toBe(true); // isError flag should be true
-  
-//     throttleJWTStub.restore(); // Restore the stubbed method
-//     process.env.NODE_ENV = 'test'; // Reset to default environment
-//     await revoker.resetAndClearData();
-//     await revoker.destroy();
-//   });
-
-//   test('Opaque Middleware - throttleOpaque is called in non-development mode with warn message', async ({ expect }) => {
-//     process.env.NODE_ENV = 'production';
-//     const throttleOpaqueStub = sinon.stub(Revoker.prototype, 'throttleOpaque'); // Stub the throttleOpaque method
-//     const revoker = new Revoker({
-//       numItems: 1000,
-//       fpRate: 0.01,
-//       rotateTime: 1000,
-//       opaqueHeader: 'Authorization',
-//       logger
-//     });
-  
-//     const middleware = revoker.getMiddleware();
-//     const next = sinon.spy();
-//     const token = 'testToken';
-//     const req = { headers: { authorization: `Bearer ${token}` } }; // Invalid token to trigger a warning
-//     const res = { status: sinon.stub().returnsThis(), json: sinon.stub() };
-  
-//     revoker.add(token); // Blacklist the token to trigger the throttled message
-  
-//     middleware(req, res, next);
-  
-//     expect(throttleOpaqueStub.calledOnce).toBe(true);
-//     expect(throttleOpaqueStub.firstCall.args[0]).toBe(`Token ${token} is blacklisted`);
-//     expect(throttleOpaqueStub.firstCall.args[1]).toBe(true);
-  
-//     throttleOpaqueStub.restore(); // Restore the stubbed method
-//     process.env.NODE_ENV = 'test'; // Reset to default environment
-//     await revoker.destroy();
-//   });
-
 })
