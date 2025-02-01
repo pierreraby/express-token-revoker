@@ -1,7 +1,6 @@
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import path from 'path';
-import { exit } from 'process';
 import { fileURLToPath } from 'url';
 import { promisify } from 'util';
 
@@ -37,9 +36,49 @@ export function createRevokerClientAsync(serverAddress) {
 
 const clientAsync = createRevokerClientAsync('localhost:50051');
 
-const revokerId = 'JWTrevoker';
-// const revokerId = 'opaqueRevoker';
+let revokerId = 'JWTrevoker';
+
 const item = 'item1';
+
+try {
+  // Example of calling the ListRevokers method
+  const listResponse = await clientAsync.ListRevokers({});
+  console.log('List Response:', listResponse);
+
+  // Example of calling the Add method
+  const addResponse = await clientAsync.add({ revokerId, item });
+  console.log('Add Response:', addResponse);
+
+  // Example of calling the Has method
+  const hasResponse1 = await clientAsync.has({ revokerId, item });
+  console.log('Has Response (1):', hasResponse1);
+
+  // Example of calling the getMetrics method
+  const metricsResponse = await clientAsync.getMetrics({ revokerId });
+  const estimatedMetrics = metricsResponse.estimatedMetrics;
+  const configuration = metricsResponse.configuration;
+  console.log('Estimated Metrics:', estimatedMetrics);
+  console.log('Configuration:', configuration);
+
+  // Example of calling the ResetAndRestore method
+  const resetRestoreResponse = await clientAsync.resetAndRestore({ revokerId });
+  console.log('ResetAndRestore Response:', resetRestoreResponse);
+
+  const hasResponse2 = await clientAsync.has({ revokerId, item });
+  console.log('Has Response (2):', hasResponse2);
+
+  // Example of calling the ResetAndClearData method
+  const resetClearDataResponse = await clientAsync.resetAndClearData({ revokerId });
+  console.log('ResetAndClearData Response:', resetClearDataResponse);
+
+  const hasResponse3 = await clientAsync.has({ revokerId, item });
+  console.log('Has Response (3):', hasResponse3);
+
+} catch (error) {
+  console.error('Error during gRPC call:', error);
+}
+
+revokerId = 'opaqueRevoker';
 
 try {
   // Example of calling the ListRevokers method

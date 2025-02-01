@@ -98,13 +98,11 @@ let server = null;
 
 /**
  * Starts the gRPC server.
- * @param {string} port - The port on which the server should listen.
+ * @param {number} port - The port on which the server should listen.
  * @param {GenericLogger} logger - The logger instance.
- * @returns {void}
+ * @returns {Promise<void>}
  */
 export function startServer(port, logger) {
-  server = new grpc.Server();
-
   /**
    * Implements the gRPC RevokerAdmin service.
    */
@@ -271,15 +269,21 @@ export function startServer(port, logger) {
     },
   };
 
-  // @ts-ignore
-  // protoloader does not generate types for the service
-  server.addService(revokerProto.RevokerAdmin.service, revokerService);
-  server.bindAsync(`0.0.0.0:${port}`, grpc.ServerCredentials.createInsecure(), (err, port) => {
-    if (err) {
-      logger.error(`Failed to bind server: ${err.message}`);
-      return;
+  server = new grpc.Server();
+  return new Promise((resolve, reject) => {
+    if (!server) {
+      return reject(new Error('Server is not initialized'));
     }
-    logger.info(`gRPC server listening on ${port}`);
+    // @ts-ignore : le protoloader ne génère pas les types pour le service
+    server.addService(revokerProto.RevokerAdmin.service, revokerService);
+    server.bindAsync(`0.0.0.0:${port}`, grpc.ServerCredentials.createInsecure(), (err, bindPort) => {
+      if (err) {
+        logger.error(`Failed to bind server: ${err.message}`);
+        return reject(err);
+      }
+      logger.info(`gRPC server listening on ${bindPort}`);
+      resolve();
+    });
   });
 }
 
@@ -289,14 +293,11 @@ export function startServer(port, logger) {
    * @param {number} [timeout=5000] Timeout in ms to force shutdown
    * @returns {Promise<void>} 
    */
- export async function stopServer(logger =console, timeout = 5000) {
-  if (server) {
-    if (revokerInstances) {
-      revokerInstances.clear();
-      revokerInstances = null;
-    }
-    
+ export async function stopServerIfLastId(logger =console, timeout = 5000) {
+  if (server && revokerInstances && revokerInstances.size === 0) {
+    revokerInstances = null;
     const currentServer = server;
+
     return new Promise((resolve) => {
       const forceShutdown = setTimeout(() => {
         if (currentServer === server) {
@@ -306,7 +307,7 @@ export function startServer(port, logger) {
         logger.info('Grpc server forcefully shutdown');
         resolve();
       }, timeout);
-  
+
       currentServer.tryShutdown(() => {
         clearTimeout(forceShutdown);
         if (currentServer === server) {

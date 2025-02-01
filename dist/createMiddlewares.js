@@ -89,7 +89,7 @@ export const createJWTMiddleware = (claimsToCheck, payloadKey, bloomFilterManage
       } else {
         res.status(401).json({
           error: "invalid_token",
-          message: `Invalid token!`,
+          message: "Invalid token!",
         });
       }
     } catch (error) {
