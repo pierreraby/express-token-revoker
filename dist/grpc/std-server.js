@@ -274,7 +274,7 @@ export function startServer(port, logger) {
     if (!server) {
       return reject(new Error('Server is not initialized'));
     }
-    // @ts-ignore : le protoloader ne génère pas les types pour le service
+    // @ts-ignore : the protoLoader does not generate types for the service
     server.addService(revokerProto.RevokerAdmin.service, revokerService);
     server.bindAsync(`0.0.0.0:${port}`, grpc.ServerCredentials.createInsecure(), (err, bindPort) => {
       if (err) {
