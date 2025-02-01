@@ -1,6 +1,6 @@
 
 // @ts-check 
-import { Revoker } from '#dist/index.js';
+import { createRevoker } from '#dist/index.js';
 import logger from '#logger';
 
 const JWTconfig = { // this config uses ~21MB of memory
@@ -22,7 +22,7 @@ const JWTconfig = { // this config uses ~21MB of memory
   }
 };
 
-const JWTrevoker = new Revoker(JWTconfig);
+const JWTrevoker = await createRevoker(JWTconfig);
 const JWTfilter = JWTrevoker.getMiddleware();
 
 const opaqueConfig = {
@@ -40,7 +40,7 @@ const opaqueConfig = {
   }
 };
 
-const opaqueRevoker = new Revoker(opaqueConfig);
+const opaqueRevoker = await createRevoker(opaqueConfig);
 const opaqueFilter = opaqueRevoker.getMiddleware();
 
 const opaqueConfigCustom = { // this config uses ~30MB of memory
@@ -56,7 +56,7 @@ const opaqueConfigCustom = { // this config uses ~30MB of memory
   }
 };
 
-const opaqueRevokerCustom = new Revoker(opaqueConfigCustom);
+const opaqueRevokerCustom = await createRevoker(opaqueConfigCustom);
 const opaqueFilterCustom = opaqueRevokerCustom.getMiddleware();
 
 export { JWTrevoker, JWTfilter, opaqueRevoker, opaqueFilter, opaqueRevokerCustom, opaqueFilterCustom };

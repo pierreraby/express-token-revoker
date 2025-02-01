@@ -16,7 +16,9 @@ const revokerInputSchema = Joi.object({
   grpcEnabled: Joi.boolean()
     .strict()
     .description('Enable gRPC server'),
-  grpcPort: Joi.string()
+  grpcPort: Joi.number()
+    .strict()
+    .port()
     .when('grpcEnabled', { is: true, then: Joi.required() })
     .when('grpcEnabled', { not: Joi.exist(), then: Joi.forbidden() })
     .when('grpcEnabled', { is: false, then: Joi.forbidden() })

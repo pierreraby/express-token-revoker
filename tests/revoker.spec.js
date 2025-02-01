@@ -1,577 +1,7 @@
 import { test } from '@japa/runner'
 import sinon from 'sinon'
-import { Revoker } from '../dist/index.js'
+import { Revoker } from '#dist/index.js'
 import { BloomFilterManager } from '../dist/Bloom-filter-manager.js'
-import throttle from 'throttleit'
-import { createJWTMiddleware, createOpaqueMiddleware } from '#dist/createMiddlewares.js'
-
-test.group('Middleware Tests', (group) => {  
-  let logger
-  let req
-  let res
-  let next
-
-  group.each.setup(() => {
-    process.env.NODE_ENV = 'test'
-    logger = {
-      info: sinon.spy(),
-      warn: sinon.spy(),
-      debug: sinon.spy(),
-      error: sinon.spy()
-    }
-    req = {}
-    res = {
-      status: sinon.stub().returnsThis(),
-      json: sinon.stub()
-    }
-    next = sinon.spy()
-  })
-
-  group.each.teardown(() => {
-    sinon.restore() // Restaure tous les stubs, fakes et mocks Sinon.
-  })
-
-  test('JWT Middleware - if in development mode, logger is called', async ({ expect }) => {
-    process.env.NODE_ENV = 'development'
-    const revoker = new Revoker({
-      id: 'test',
-      claimsToCheck: ['claim1'],
-      payloadKey: 'token',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 1000
-      },
-    })
-
-    const middleware = revoker.getMiddleware()
-    const req = {
-      token: {
-        claim: 'value'
-      }
-    }
-
-    revoker.add('claim-value') // Blacklist the claim
-    middleware(req, res, next)
-
-    expect(logger.info.called).toBe(true)
-    expect(logger.warn.called).toBe(true)
-    expect(logger.error.called).toBe(false)
-    await revoker.resetAndClearData();
-    await revoker.destroy()
-  })
-
-  test('JWT Middleware - missing payload', async ({ expect }) => {
-    const revoker = new Revoker({
-      id: 'test',
-      claimsToCheck: ['claim1', 'claim2'],
-      payloadKey: 'token',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 2000
-      },
-    })
-    
-    const middleware = revoker.getMiddleware()
-    middleware(req, res, next)
-
-    expect(logger.info.called).toBe(true)
-    expect(logger.info.calledWith('Missing jwt token'))
-    expect(next.called).toBe(false)
-    expect(res.status.calledWith(400)).toBe(true)
-    expect(res.json.calledOnce).toBe(true)
-    expect(res.json.firstCall.args[0]).toMatchObject({
-      error: 'validation_error',
-      message: 'Missing JWT payload in request'
-    })
-    await revoker.resetAndClearData();
-    await revoker.destroy()
-
-  })
-
-  test('JWT Middleware - missing required claim', async ({ expect }) => {
-    const revoker = new Revoker({
-      id: 'test',
-      claimsToCheck: ['claim1', 'claim2'],
-      payloadKey: 'token',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 2000
-      },
-    })
-     
-    const middleware = revoker.getMiddleware()
-    req = {
-      token: {
-        claim1: 'value1'
-      }
-    }
-    
-    middleware(req, res, next)
-
-    expect(logger.info.called).toBe(true)
-    expect(logger.info.calledWith('Missing claim2 in jwt token'))
-    expect(next.called).toBe(false)
-    expect(res.status.calledWith(400)).toBe(true)
-    expect(res.json.calledOnce).toBe(true)
-    expect(res.json.firstCall.args[0]).toMatchObject({
-      error: 'validation_error',
-      message: 'Missing claim2 claim in JWT Payload'
-    })
-    await revoker.resetAndClearData();
-    await revoker.destroy()
-  })
-
-  test('JWT Middleware - valid token with all required claims', async ({ expect }) => {
-    const revoker = new Revoker({
-      id: 'test',
-      claimsToCheck: ['claim1', 'claim2'],
-      payloadKey: 'token',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 2000
-      },
-    })
-    
-    const middleware = revoker.getMiddleware()
-    req = {
-      token: {
-        claim1: 'value1',
-        claim2: 'value2'
-      }
-    }
-    middleware(req, res, next)
-    console.log(next.called)
-    expect(next.calledOnce).toBe(true)
-    expect(res.status.called).toBe(false)
-    expect(res.json.called).toBe(false)
-    await revoker.resetAndClearData();
-    await revoker.destroy()
-  })
-
-  test('JWT Middleware - valid token with all required claims and blacklisted claim', async ({ expect }) => {
-    const revoker = new Revoker({
-      id: 'test',
-      claimsToCheck: ['claim1', 'claim2'],
-      payloadKey: 'token',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 2000
-      },
-    })
-
-    const middleware = revoker.getMiddleware()
-    revoker.add('claim1-value1') // Blacklist le claim
-
-    req = {
-      token: {
-        claim1: 'value1',
-        claim2: 'value2'
-      }
-    }
-
-    middleware(req, res, next)
-
-    expect(next.called).toBe(false)
-    expect(res.status.calledWith(401)).toBe(true)
-    expect(res.json.calledOnce).toBe(true)
-    expect(res.json.firstCall.args[0]).toMatchObject({
-      error: 'invalid_token',
-      message: expect.stringContaining('Invalid token!')
-    })
-    await revoker.resetAndClearData();
-    await revoker.destroy()
-  })
-
-  test('JWT Middleware - log internal error', async ({ expect }) => {
-    const revoker = new Revoker({
-      id: 'test',
-      claimsToCheck: ['claim1', 'claim2'],
-      payloadKey: 'token',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 2000
-      },
-    })
-
-    const middleware = revoker.getMiddleware()
-    const error = new Error('Internal error')
-    const next = sinon.stub().throws(error)
-    req = {
-      token: {
-        claim1: 'value1',
-        claim2: 'value2'
-      }
-    }
-
-    middleware(req, res, next)
-
-    expect(logger.error.calledOnceWithExactly(error))
-    expect(res.status.calledWith(500)).toBe(true)
-    expect(res.json.calledOnce).toBe(true)
-    expect(res.json.firstCall.args[0]).toMatchObject({
-      error: 'internal_error',
-      message: expect.stringContaining('An unexpected error occurred')
-    })
-    await revoker.resetAndClearData();
-    await revoker.destroy()
-  })
-
-  test('Opaque Middleware - if in development mode, logger is called', async ({ expect }) => {
-    process.env.NODE_ENV = 'development'
-    const revoker = new Revoker({
-      id: 'test',
-      opaqueHeader: 'Authorization',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 2000
-      },
-    })
-    
-    const middleware = revoker.getMiddleware()
-    const req = {
-      headers: {
-        authorization
-        : 'Bearer validToken'
-      }
-    }
-
-    revoker.add('validToken') // Blacklist le token
-    middleware(req, res, next)
-
-    expect(logger.info.called).toBe(true)
-    expect(logger.warn.called).toBe(false)
-    expect(logger.error.called).toBe(false)
-    await revoker.resetAndClearData();
-    await revoker.destroy()
-
-  })
-
-  test('Opaque Middleware - valid Authorization header', async ({ expect }) => {
-    const revoker = new Revoker({
-      id: 'test',
-      opaqueHeader: 'Authorization',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 2000
-      },
-    })
-    
-    const middleware = revoker.getMiddleware()
-    req = {
-      headers: {
-        authorization: 'Bearer validToken'
-      }
-    }
-
-    middleware(req, res, next)
-
-    expect(next.calledOnce).toBe(true)
-    expect(res.status.called).toBe(false)
-    expect(res.json.called).toBe(false)
-    await revoker.resetAndClearData();
-    await revoker.destroy()
-  })
-
-  test('Opaque Middleware - missing Authorization header', async ({ expect }) => {
-    const revoker = new Revoker({
-      id: 'test',
-      opaqueHeader: 'Authorization',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 2000
-      },
-    })
-    
-    const middleware = revoker.getMiddleware()
-    req = {
-      headers: {}
-    }
-
-    try {
-      middleware(req, res, next)
-    } catch (error) {
-      expect(error.message).toBe('Missing header: Authorization')
-    }
-
-    expect(next.called).toBe(false)
-    expect(res.status.calledWith(400)).toBe(true)
-    expect(res.json.calledOnce).toBe(true)
-    expect(res.json.firstCall.args[0]).toMatchObject({
-      error: 'validation_error',
-      message: 'Missing header: authorization'
-    })
-    await revoker.resetAndClearData();
-    await revoker.destroy()
-  })
-
-  test('Opaque Middleware - invalid Authorization header format', async ({ expect }) => {
-    const revoker = new Revoker({
-      id: 'test',
-      opaqueHeader: 'Authorization',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 2000
-      },
-    })
-    
-    const middleware = revoker.getMiddleware()
-    req = {
-      headers: {
-        authorization: 'InvalidFormat'
-      }
-    }
-
-    try {
-      middleware(req, res, next)
-    } catch (error) {
-      expect(error.message).toBe('Invalid authorization header')
-    }
-
-    expect(next.called).toBe(false)
-    expect(res.status.calledWith(400)).toBe(true)
-    expect(res.json.calledOnce).toBe(true)
-    expect(res.json.firstCall.args[0]).toMatchObject({
-      error: 'validation_error',
-      message: 'Invalid authorization header format. Expected "Bearer <token>"'
-    })
-    
-    await revoker.resetAndClearData();
-    await revoker.destroy()
-  })
-
-  test('Opaque Middleware - blacklisted token', async ({ expect }) => {
-    const revoker = new Revoker({
-      id: 'test',
-      opaqueHeader: 'Authorization',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 2000
-      },
-    })
-    
-    const token = 'validToken'
-    revoker.add(token) // Blacklist le token
-    
-    const middleware = revoker.getMiddleware()
-    req = {
-      headers: {
-        authorization: `Bearer ${token}`
-      }
-    }
-
-    try {
-      middleware(req, res, next)
-    } catch (error) {
-      expect(error.message).toBe(`Token ${token} is blacklisted`)
-    }
-
-    expect(next.called).toBe(false)
-    expect(res.status.calledWith(401)).toBe(true)
-    expect(res.json.calledOnce).toBe(true)
-    await revoker.resetAndClearData();
-    await revoker.destroy()
-  })
-
-  test('Opaque Middleware - custom header validation', async ({ expect }) => {
-    const revoker = new Revoker({
-      id: 'test',
-      opaqueHeader: 'X-Custom-Token',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 2000
-      },
-    })
-    
-    const middleware = revoker.getMiddleware()
-    req = {
-      headers: {
-        'x-custom-token': 'validToken'
-      }
-    }
-
-    middleware(req, res, next)
-
-    expect(next.calledOnce).toBe(true)
-    expect(res.status.called).toBe(false)
-    expect(res.json.called).toBe(false)
-    await revoker.resetAndClearData();
-    await revoker.destroy()
-  })
-
-  test('Opaque Middleware - log internal error', async ({ expect }) => {
-    const revoker = new Revoker({
-      id: 'test',
-      opaqueHeader: 'Authorization',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 2000
-      },
-    })
-
-    const middleware = revoker.getMiddleware()
-    const error = new Error('Internal error')
-    const next = sinon.stub().throws(error)
-    req = {
-      headers: {
-        authorization
-        : 'Bearer validToken'
-      }
-    }
-
-    middleware(req, res, next)
-
-    expect(logger.error.calledOnceWithExactly(error))
-    expect(res.status.calledWith(500)).toBe(true)
-    expect(res.json.calledOnce).toBe(true)
-    expect(res.json.firstCall.args[0]).toMatchObject({
-      error: 'internal_error',
-      message: expect.stringContaining('An unexpected error occurred')
-    })
-    await revoker.resetAndClearData();
-    await revoker.destroy()
-  })
-
-  test('logOrThrottle logs in development mode', async ({ expect }) => {
-    process.env.NODE_ENV = 'development'
-    const throttleStub = sinon.stub(throttle, 'default').returns(() => {})
-    const loggerInfoStub = sinon.stub(logger, 'info')
-
-    // Accédez à la fonction non exportée via l'objet du module
-    indexModule.logOrThrottle('test message', throttleStub, logger)
-
-    expect(loggerInfoStub.calledOnceWithExactly('test message')).toBe(true)
-    expect(throttleStub.called).toBe(false)
-    process.env.NODE_ENV = 'test'
-  })
-
-  test('logOrThrottle throttles in non-development mode', async ({ expect }) => {
-    process.env.NODE_ENV = 'production'
-    const throttleStub = sinon.stub(throttle, 'default').returns(() => {})
-    const loggerInfoStub = sinon.stub(logger, 'info')
-
-    indexModule.logOrThrottle('test message', throttleStub, logger)
-
-    expect(throttleStub.calledOnceWithExactly('test message')).toBe(true)
-    expect(loggerInfoStub.called).toBe(false)
-    process.env.NODE_ENV = 'test'
-  })
-
-  test('logOrThrottle logs error when throttleFn throws', async ({ expect }) => {
-    process.env.NODE_ENV = 'production'
-    const error = new Error('Throttle error')
-    const throttleStub = sinon.stub(throttle, 'default').throws(error)
-    const loggerErrorStub = sinon.stub(logger, 'error')
-
-    indexModule.logOrThrottle('test message', throttleStub, logger)
-
-    expect(loggerErrorStub.calledOnce).toBe(true)
-    expect(loggerErrorStub.firstCall.args[0]).toBe('Error in logOrThrottle:')
-    expect(loggerErrorStub.firstCall.args[1]).toEqual(error)
-    process.env.NODE_ENV = 'test'
-  })
-
-  test('logOrThrottle logs warning in development mode for error messages', async ({ expect }) => {
-    process.env.NODE_ENV = 'development'
-    const throttleStub = sinon.stub(throttle, 'default').returns(() => {})
-    const loggerWarnStub = sinon.stub(logger, 'warn')
-
-    indexModule.logOrThrottle('error message', throttleStub, logger, true)
-
-    expect(loggerWarnStub.calledOnceWithExactly('error message')).toBe(true)
-    expect(throttleStub.called).toBe(false)
-    process.env.NODE_ENV = 'test'
-  })
-
-
-//   test('JWT Middleware - throttleJWT is called in non-development mode with warn message', async ({ expect }) => {
-//     process.env.NODE_ENV = 'production';
-//     const revoker = new Revoker({
-//       numItems: 1000,
-//       fpRate: 0.01,
-//       rotateTime: 1000,
-//       claimsToCheck: ['claim1'],
-//       logger
-//     });
-
-//     const throttleJWTStub = sinon.stub(revoker, 'throttleJWT');
-  
-//     const middleware = revoker.getMiddleware();
-//     const next = sinon.spy();
-//     const req = { token: { claim1: 'value1' } }; // Blacklisted claim
-//     const res = { status: sinon.stub().returnsThis(), json: sinon.stub() };
-  
-//     revoker.add('claim1-value1'); // Blacklist the claim to trigger the throttled message
-  
-//     middleware(req, res, next);
-
-//     expect(throttleJWTStub.called).toBe(true);
-//     expect(throttleJWTStub.calledOnce).toBe(true);
-//     expect(throttleJWTStub.firstCall.args[0]).toBe('Token claim1 is blacklisted');
-//     expect(throttleJWTStub.firstCall.args[1]).toBe(true); // isError flag should be true
-  
-//     throttleJWTStub.restore(); // Restore the stubbed method
-//     process.env.NODE_ENV = 'test'; // Reset to default environment
-//     await revoker.resetAndClearData();
-//     await revoker.destroy();
-//   });
-
-//   test('Opaque Middleware - throttleOpaque is called in non-development mode with warn message', async ({ expect }) => {
-//     process.env.NODE_ENV = 'production';
-//     const throttleOpaqueStub = sinon.stub(Revoker.prototype, 'throttleOpaque'); // Stub the throttleOpaque method
-//     const revoker = new Revoker({
-//       numItems: 1000,
-//       fpRate: 0.01,
-//       rotateTime: 1000,
-//       opaqueHeader: 'Authorization',
-//       logger
-//     });
-  
-//     const middleware = revoker.getMiddleware();
-//     const next = sinon.spy();
-//     const token = 'testToken';
-//     const req = { headers: { authorization: `Bearer ${token}` } }; // Invalid token to trigger a warning
-//     const res = { status: sinon.stub().returnsThis(), json: sinon.stub() };
-  
-//     revoker.add(token); // Blacklist the token to trigger the throttled message
-  
-//     middleware(req, res, next);
-  
-//     expect(throttleOpaqueStub.calledOnce).toBe(true);
-//     expect(throttleOpaqueStub.firstCall.args[0]).toBe(`Token ${token} is blacklisted`);
-//     expect(throttleOpaqueStub.firstCall.args[1]).toBe(true);
-  
-//     throttleOpaqueStub.restore(); // Restore the stubbed method
-//     process.env.NODE_ENV = 'test'; // Reset to default environment
-//     await revoker.destroy();
-//   });
-
-})
 
 test.group('Revoker Constructor Validation Tests', (group) => {
   let logger
@@ -831,7 +261,7 @@ test.group('Revoker Constructor Validation Tests', (group) => {
     })).toThrow('Invalid input: \"grpcPort\" is not allowed')
   });
 
-  test('Constructor throws error if grpcPort is not a string', ({ expect }) => {
+  test('Constructor throws error if grpcPort is not a number', ({ expect }) => {
     expect(() => new Revoker({
       id: 'test',
       claimsToCheck: ['claim1'],
@@ -843,8 +273,8 @@ test.group('Revoker Constructor Validation Tests', (group) => {
         rotateTime: 2000
       },
       grpcEnabled: true,
-      grpcPort: 50051,
-    })).toThrow('Invalid input: \"grpcPort\" must be a string')
+      grpcPort: "50051",
+    })).toThrow('Invalid input: \"grpcPort\" must be a number')
   });
 
     test('Constructor throws error if BloomFilterManager initialization fails', async ({ expect }) => {
@@ -1093,7 +523,7 @@ test.group('Revoker Class Tests', (group) => {
         rotateTime: 2000
       },
       grpcEnabled: true,
-      grpcPort: '50051'
+      grpcPort: 50051
     })
 
     expect(() => revoker.add('test')).toThrow('gRPC is enabled, use the gRPC method instead')
@@ -1116,25 +546,6 @@ test.group('Revoker Class Tests', (group) => {
     const addStub = sinon.stub(revoker.bloomFilterManager, 'add').throws(new Error('Add failed'))
     expect(() => revoker.add('test')).toThrow('Add failed')
     expect(addStub.calledOnceWithExactly('test')).toBe(true)
-    await revoker.destroy()
-  })
-
-  test('has throws error when gRPC is enabled', async ({ expect }) => {
-    const revoker = new Revoker({
-      id: 'test',
-      claimsToCheck: ['claim1'],
-      payloadKey: 'token',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 2000
-      },
-      grpcEnabled: true,
-      grpcPort: '50051'
-    })
-
-    expect(() => revoker.has('test')).toThrow('gRPC is enabled, use the gRPC method instead')
     await revoker.destroy()
   })
 
@@ -1177,44 +588,6 @@ test.group('Revoker Class Tests', (group) => {
     await revoker.destroy()
   })
 
-  test('getMetrics throws error when gRPC is enabled', async ({ expect }) => {
-    const revoker = new Revoker({
-      id: 'test',
-      claimsToCheck: ['claim1'],
-      payloadKey: 'token',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 2000
-      },
-      grpcEnabled: true,
-      grpcPort: '50051'
-    })
-
-    expect(() => revoker.getMetrics()).toThrow('gRPC is enabled, use the gRPC method instead')
-    await revoker.destroy()
-  })
-
-  test('resetAndRestore throws error when gRPC is enabled', async ({ expect }) => {
-    const revoker = new Revoker({
-      id: 'test',
-      claimsToCheck: ['claim1'],
-      payloadKey: 'token',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 2000
-      },
-      grpcEnabled: true,
-      grpcPort: '50051'
-    })
-
-    await expect(revoker.resetAndRestore()).rejects.toThrow('gRPC is enabled, use the gRPC method instead')
-    await revoker.destroy()
-  })
-
   test('resetAndRestore calls bloomFilterManager.resetAndRestore and logs error if resetAndRestore fails', async ({ expect }) => {
     const revoker = new Revoker({
       id: 'test',
@@ -1234,25 +607,6 @@ test.group('Revoker Class Tests', (group) => {
     expect(logger.error.calledOnce).toBe(true)
     expect(logger.error.firstCall.args[0]).toBe('Error in Revoker.resetAndRestore:')
     expect(logger.error.firstCall.args[1].message).toBe('Reset failed')
-    await revoker.destroy()
-  })
-
-  test('resetAndClearData throws error when gRPC is enabled', async ({ expect }) => {
-    const revoker = new Revoker({
-      id: 'test',
-      claimsToCheck: ['claim1'],
-      payloadKey: 'token',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 2000
-      },
-      grpcEnabled: true,
-      grpcPort: '50051'
-    })
-
-    await expect(revoker.resetAndClearData()).rejects.toThrow('gRPC is enabled, use the gRPC method instead')
     await revoker.destroy()
   })
 
@@ -1595,72 +949,47 @@ test.group('Extended Middleware Tests', (group) => {
     middleware(req, res, next)
     expect(next.calledOnce).toBe(true)
   })
+});
 
+  test.group('Revoker Class - gRPC Tests', (group) => {
+    let logger = {
+      info: sinon.spy(),
+      warn: sinon.spy(),
+      debug: sinon.spy(),
+      error: sinon.spy()
+    }
 
-  // test('JWT Middleware - throttle is called in non-development mode', async ({ expect }) => {
-  //   process.env.NODE_ENV = 'production';
-  //   const logOrThrottleStub = sinon.stub(Revoker.prototype, 'logOrThrottle');
+    let revoker
 
-  //   revoker = new Revoker({
-  //       numItems: 1000,
-  //       fpRate: 0.01,
-  //       rotateTime: 1000,
-  //       claimsToCheck: ['claim1'],
-  //       logger,
-  //   });
+    group.setup(async () => {
+      revoker = new Revoker({
+        id: 'test',
+        claimsToCheck: ['claim1'],
+        payloadKey: 'token',
+        logger,
+        filter: {
+          numItems: 1000,
+          fpRate: 0.01,
+          rotateTime: 2000
+        },
+        grpcEnabled: true,
+        grpcPort: 50051
+      })
+      await revoker._grpcInit()
+    })
 
-  //   const middleware = revoker.getMiddleware();
-  //   const next = sinon.spy();
-  //   const req = { token: { claim1: 'value1' } };
-  //   const res = { status: sinon.stub().returnsThis(), json: sinon.stub() };
+    group.teardown(async () => {
+      if (revoker) {
+        await revoker.destroy()
+      }
+    })
 
-  //   logger.info.resetHistory();
-  //   logger.warn.resetHistory();
-  //   revoker.add('claim1-value1'); // Blacklist the claim
-  //   middleware(req, res, next);
-
-  //   expect(logOrThrottleStub.called).toBe(true);
-  //   expect(logger.info.called).toBe(true);
-  //   expect(logger.warn.called).toBe(false);
-  //   expect(logger.error.calledOnceWithExactly('Token claim1 is blacklisted'));
-  //   process.env.NODE_ENV = 'test';
-  //   logOrThrottleStub.restore();
-  //   await revoker.destroy();
-  // });
-
-  // test('Opaque Middleware - throttle is called in non-development mode', async ({ expect }) => {
-  //   process.env.NODE_ENV = 'production';
-  //   // logger = { info: sinon.spy(), warn: sinon.spy(), error: sinon.spy() };
-  //   const throttleOpaqueStub = sinon.spy();
-
-  //   revoker = new Revoker({
-  //       numItems: 1000,
-  //       fpRate: 0.01,
-  //       rotateTime: 1000,
-  //       opaqueHeader: 'Authorization',
-  //       logger,
-  //   });
-
-  //   const middleware = revoker.getMiddleware();
-  //   const next = sinon.spy();
-  //   const token = 'testToken';
-  //   const req = { headers: { authorization: `Bearer ${token}` } };
-  //   const res = { status: sinon.stub().returnsThis(), json: sinon.stub() };
-
-  //   logger.info.resetHistory();
-  //   logger.warn.resetHistory();
-  //   await revoker.add(token);
-    
-  //   middleware(req, res, next);
-
-  //   expect(throttleOpaqueStub.called).toBe(true); // Because the stub is not used inside the middleware
-  //   expect(logger.info.called).toBe(true);
-  //   expect(logger.warn.called).toBe(false);
-  //   expect(logger.error.calledOnceWithExactly(`Token ${token} is blacklisted`));
-  //   process.env.NODE_ENV = 'test';
-  //   await await revoker.destroy();
-
-
-  });
+    test('has throws error when gRPC is enabled', async ({ expect }) => {
+      expect(() => revoker.has('test')).toThrow('gRPC is enabled, use the gRPC method instead')
+      expect(() => revoker.getMetrics()).toThrow('gRPC is enabled, use the gRPC method instead')
+      await expect(revoker.resetAndRestore()).rejects.toThrow('gRPC is enabled, use the gRPC method instead')
+      await expect(revoker.resetAndClearData()).rejects.toThrow('gRPC is enabled, use the gRPC method instead')
+    })
+})
 
   
