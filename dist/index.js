@@ -37,6 +37,18 @@ export class Revoker {
   /** @type {number} */
   grpcPort;
 
+  /** @types  {Function} */
+  startServer;
+
+  /** @types  {Function} */
+  registerRevokerInstance;
+
+  /** @types  {Function} */
+  unregisterRevokerInstance;
+
+  /** @types  {Function} */
+  stopServerIfLastId;
+
   /** @type {boolean} */
   static grpcServerStarted = false;
 
@@ -54,18 +66,32 @@ export class Revoker {
    * @property {string} id - The ID of the Revoker instance.
    * @property {GenericLogger} logger - Any logger implementing the basic logging methods
    * @property {boolean} [grpcEnabled] - Whether to enable gRPC.
-   * @property {string} [grpcPort] - The port for the gRPC server.
+   * @property {number} [grpcPort] - The port for the gRPC server.
    * @property {FilterConfig} filter - Configuration options for the Bloom filter.
    * @typedef {ConfigBase & { claimsToCheck: Array<string>, payloadKey: string, opaqueHeader?: never }} JWTConfig
    * @typedef {ConfigBase & { opaqueHeader: string, claimsToCheck?: never, payloadKey?: never }} OpaqueConfig
    * @typedef {JWTConfig | OpaqueConfig} Config
    */
+  /**
+   * @typedef {Object} gRPCFunctions
+   * @property {Function} [startServerFn] - Function to start the gRPC server.
+   * @property {Function} [registerRevokerInstanceFn] - Function to register a Revoker instance.
+   * @property {Function} [unregisterRevokerInstanceFn] - Function to unregister a Revoker instance.
+   * @property {Function} [stopServerIfLastIdFn] - Function to stop the gRPC server if the last ID is removed.
+   */
 
   /**
    * @param {Config} config - Configuration options.
+   * @param {gRPCFunctions} [grpcFunctions] - Functions for gRPC server management.
    * @throws {Error} If neither `claimsToCheck` nor `opaqueHeader` is provided.
    */
-  constructor(config) {
+  constructor(config, {
+    startServerFn = startServer,
+    registerRevokerInstanceFn = registerRevokerInstance,
+    unregisterRevokerInstanceFn = unregisterRevokerInstance,
+    stopServerIfLastIdFn = stopServerIfLastId
+    } = {}) 
+  {
 
     const { error } = revokerInputSchema.validate(config);
     if (error) {
@@ -110,15 +136,12 @@ export class Revoker {
     this.grpcEnabled = grpcEnabled;
     this.grpcPort = grpcPort ? Number(grpcPort) : 0;
 
-    // if (this.grpcEnabled) {
-    //   registerRevokerInstance(this);
-    //   if (!Revoker.grpcServerStarted && grpcPort) {
-    //     logger.info(`Starting gRPC server with id:  ${this.id}`);
-    //     logger.info(`grpcEnabled: ${this.grpcEnabled}`);
-    //     startServer(grpcPort, logger);
-    //     Revoker.grpcServerStarted = true;
-    //   }
-    // }
+    this.startServer = startServerFn;
+    this.registerRevokerInstance = registerRevokerInstanceFn;
+    this.unregisterRevokerInstance = unregisterRevokerInstanceFn;
+    this.stopServerIfLastId = stopServerIfLastIdFn;
+
+
   }
 
   /**
@@ -129,7 +152,7 @@ export class Revoker {
    */
   async _grpcInit() {
     if (this.grpcEnabled && this.grpcPort) {
-      registerRevokerInstance(this);
+      this.registerRevokerInstance(this);
       if (!Revoker.grpcServerStarted) {
         this.logger.info(`Starting gRPC server with id: ${this.id}`);
         this.logger.info(`grpcEnabled: ${this.grpcEnabled}`);
@@ -268,9 +291,9 @@ export class Revoker {
   async destroy() {
     try {
       if (this.grpcEnabled && Revoker.grpcServerStarted) {
-        unregisterRevokerInstance(this.id);
+        this.unregisterRevokerInstance(this.id);
         this.logger.info("Stopping gRPC server");
-        await stopServerIfLastId(this.logger);
+        await this.stopServerIfLastId(this.logger);
         this.grpcEnabled = false;
         Revoker.grpcServerStarted = false;
       }
@@ -291,10 +314,11 @@ export class Revoker {
 /**
  * Creates a Revoker instance.
  * @param {Config} config - Configuration options.
+ * @param {gRPCFunctions} [grpcFunctions] - Functions for gRPC server management.
  * @returns {Promise<Revoker>} The Revoker instance.
  */
-export async function createRevoker(config) {
-  const revoker = new Revoker(config);
+export async function createRevoker(config, grpcFunctions = {}) {
+  const revoker = new Revoker(config, grpcFunctions);
   return await revoker._grpcInit();
 }
 
