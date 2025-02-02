@@ -1,0 +1,131 @@
+import { test } from '@japa/runner'
+import sinon from 'sinon'
+import { createRevoker, Revoker } from '#dist/index.js'
+
+
+test.group('createRevoker Function Tests', (group) => {
+  let logger, startServerStub, registerRevokerInstanceStub, unregisterRevokerInstance, stopServerIfLastIdStub
+
+  group.each.setup(async () => {
+    logger = {
+      info: sinon.spy(),
+      warn: sinon.spy(),
+      debug: sinon.spy(),
+      error: sinon.spy()
+    }
+    // Stub gRPC server functions
+    startServerStub = sinon.stub().resolves()
+    registerRevokerInstanceStub = sinon.stub()
+    unregisterRevokerInstance = sinon.stub()
+    stopServerIfLastIdStub = sinon.stub().resolves()
+  })
+
+  group.each.teardown(() => {
+    sinon.restore()
+  })
+
+  test('createRevoker initializes gRPC server if enabled', async ({ expect }) => {
+    const revoker = await createRevoker({
+      id: 'test-grpc',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: { numItems: 1000, fpRate: 0.01, rotateTime: 2000 },
+      grpcEnabled: true,
+      grpcPort: 50051
+    }, {
+      startServerFn: startServerStub,
+      registerRevokerInstanceFn: registerRevokerInstanceStub,
+      unregisterRevokerInstanceFn: unregisterRevokerInstance,
+      stopServerIfLastIdFn: stopServerIfLastIdStub
+    })
+
+    expect(revoker).toBeInstanceOf(Revoker)
+    expect(revoker.grpcEnabled).toBe(true)
+    expect(revoker.grpcPort).toBe(50051)
+    expect(registerRevokerInstanceStub.calledOnceWithExactly(revoker)).toBe(true)
+    expect(startServerStub.calledOnceWithExactly(50051, logger)).toBe(true)
+    expect(Revoker.grpcServerStarted).toBe(true)
+
+    await revoker.destroy()
+  })
+
+  test('createRevoker initializes and returns a Revoker instance with Opaque config', async ({ expect }) => {
+    const revoker = await createRevoker({
+      id: 'test-opaque',
+      opaqueHeader: 'Authorization',
+      logger,
+      filter: { numItems: 1000, fpRate: 0.01, rotateTime: 2000 }
+    })
+
+    expect(revoker).toBeInstanceOf(Revoker)
+    expect(revoker.id).toBe('test-opaque')
+    expect(typeof revoker.getMiddleware()).toBe('function')
+    expect(revoker.grpcEnabled).toBe(false)
+    expect(revoker.grpcPort).toBe(0)
+    expect(registerRevokerInstanceStub.called).toBe(false)
+    expect(startServerStub.called).toBe(false)
+
+    await revoker.destroy()
+  })
+
+  test('createRevoker throws error if invalid configuration is provided', async ({ expect }) => {
+    await expect(createRevoker({
+      id: 'test-invalid',
+      logger,
+      filter: { numItems: 1000, fpRate: 0.01, rotateTime: 2000 }
+    })).rejects.toThrow('Invalid input: "claimsToCheck" is required') // Example of invalid config
+  })
+
+  test('createRevoker throws error if BloomFilterManager initialization fails', async ({ expect }) => {
+    await expect(createRevoker({
+      id: 'test-invalid-filter',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: { fpRate: 0.01, rotateTime: 2000 } // Missing numItems
+    })).rejects.toThrow('Failed to initialize BloomFilterManager: Invalid input: "numItems" is required')
+  })
+
+  test('createRevoker calls destroy on Revoker instance if gRPC initialization fails', async ({ expect }) => {
+    const error = new Error('Failed to start gRPC server')
+    startServerStub.rejects(error)
+
+    const revoker = new Revoker({
+      id: 'test-grpc-fail',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: { numItems: 1000, fpRate: 0.01, rotateTime: 2000 },
+      grpcEnabled: true,
+      grpcPort: 50051
+    })
+
+    const destroySpy = sinon.spy(revoker, 'destroy')
+
+    await expect(revoker._grpcInit()).rejects.toThrow('Failed to start gRPC server')
+    expect(destroySpy.calledOnce).toBe(true)
+    expect(logger.error.calledWithExactly('Error during Revoker destruction:', error))
+    await revoker.destroy()
+  })
+
+  test('createRevoker does not start gRPC server if already started', async ({ expect }) => {
+    Revoker.grpcServerStarted = true // Simulate server already started
+
+    const revoker = await createRevoker({
+      id: 'test-grpc-already-started',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: { numItems: 1000, fpRate: 0.01, rotateTime: 2000 },
+      grpcEnabled: true,
+      grpcPort: 50051
+    })
+
+    expect(registerRevokerInstanceStub.calledOnceWithExactly(revoker)).toBe(true)
+    expect(startServerStub.called).toBe(false)
+
+    await revoker.destroy()
+  })
+
+})

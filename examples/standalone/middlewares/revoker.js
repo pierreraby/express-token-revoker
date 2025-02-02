@@ -8,7 +8,7 @@ const JWTconfig = { // this config uses ~21MB of memory
   id: "JWTrevoker",
   logger,
   grpcEnabled: true,
-  grpcPort: "50051",
+  grpcPort: 50051,
   // Token validation configuration
   claimsToCheck: ["jti", "fam", "sub"], // adding claims to check, return a JWT check middleware
   payloadKey: "token", // key to get token payload from request
@@ -30,7 +30,7 @@ const opaqueConfig = {
   opaqueHeader: "Authorization", // adding header where to check opaque token, maybe 'X-Auth-Token', etc
   logger,
   grpcEnabled: true,
-  grpcPort: "50051",
+  grpcPort: 50051,
   filter: {
     numItems: 1000000,
     fpRate: 0.000001,

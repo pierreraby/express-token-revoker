@@ -365,6 +365,7 @@ test.group('Revoker Constructor Validation Tests', (group) => {
     expect(revoker.bloomFilterManager.backupTime).toBe(1000)
     await revoker.destroy()
   })
+
 })
 
 // Tests de la classe Revoker
@@ -958,7 +959,7 @@ test.group('Revoker Class - gRPC Tests', (group) => {
     }
   })
 
-  test('has throws error when gRPC is enabled', async ({ expect }) => {
+  test('All exposed throws error when gRPC is enabled', async ({ expect }) => {
     expect(() => revoker.has('test')).toThrow('gRPC is enabled, use the gRPC method instead')
     expect(() => revoker.getMetrics()).toThrow('gRPC is enabled, use the gRPC method instead')
     await expect(revoker.resetAndRestore()).rejects.toThrow('gRPC is enabled, use the gRPC method instead')
@@ -966,48 +967,5 @@ test.group('Revoker Class - gRPC Tests', (group) => {
   })
 })
 
-// import * as grpcModule from '#dist/grpc/std-server.js'
-// import { createRevoker } from '#dist/index.js'
-
-// test.group('createRevoker Function Tests', (group) => {
-//   let logger, startServerStub
-
-//   group.each.setup(async () => {
-//     logger = {
-//       info: sinon.spy(),
-//       warn: sinon.spy(),
-//       debug: sinon.spy(),
-//       error: sinon.spy()
-//     }
-//     // startServerStub = sinon.stub().resolves()
-//     const fakeModule = {...grpcModule}
-//     console.log('fakeModule', fakeModule)
-//     startServerStub = sinon.stub(fakeModule, 'startServer')
-//     // Reset static flag for fresh start
-//     Revoker.grpcServerStarted = false
-//   })
-
-//   group.each.teardown(() => {
-//     sinon.restore()
-//   })
-
-//   test('createRevoker initializes and returns a Revoker instance', async ({ expect }) => {
-//     const revoker = await createRevoker({
-//       id: 'test',
-//       claimsToCheck: ['claim1'],
-//       payloadKey: 'token',
-//       logger,
-//       filter: { numItems: 1000, fpRate: 0.01, rotateTime: 2000 },
-//       grpcEnabled: true,
-//       grpcPort: 50051
-//     })
-//     expect(typeof revoker.getMiddleware()).toBe('function')
-//     console.log(startServerStub.args)
-//     expect(startServerStub.calledOnce).toBe(true)
-//     expect(startServerStub.calledWith(50051, logger)).toBe(true)
-
-//     await revoker.destroy()
-//   })
-// })
 
   
