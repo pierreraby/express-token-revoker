@@ -1,7 +1,7 @@
 import { test } from '@japa/runner'
 import sinon from 'sinon'
 import throttle from "throttleit";
-import { BloomFilterManager } from '../dist/Bloom-filter-manager.js'
+import { BloomFilterManager } from '../../dist/Bloom-filter-manager.js'
 import { createJWTMiddleware, createOpaqueMiddleware } from '#dist/createMiddlewares.js'
 
 test.group('Middleware Tests', (group) => {  

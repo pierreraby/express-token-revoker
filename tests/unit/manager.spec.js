@@ -1,7 +1,7 @@
 import { test } from '@japa/runner'
 import sinon from 'sinon'
 import fs from 'fs'
-import { BloomFilterManager } from '../dist/Bloom-filter-manager.js'
+import { BloomFilterManager } from '../../dist/Bloom-filter-manager.js'
 
 
 test.group('BloomFilterManager Constructor Validation', (group) => {
