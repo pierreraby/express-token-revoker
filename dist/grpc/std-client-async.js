@@ -29,7 +29,8 @@ export function createRevokerClientAsync(serverAddress) {
     getMetrics: promisify(client.getMetrics).bind(client),
     resetAndRestore: promisify(client.resetAndRestore).bind(client),
     resetAndClearData: promisify(client.resetAndClearData).bind(client),
-    ListRevokers: promisify(client.ListRevokers).bind(client)
+    ListRevokers: promisify(client.ListRevokers).bind(client),
+    close: client.close.bind(client)
   };
   return promisifiedClient;
 }
@@ -117,3 +118,5 @@ try {
 } catch (error) {
   console.error('Error during gRPC call:', error);
 }
+
+clientAsync.close();

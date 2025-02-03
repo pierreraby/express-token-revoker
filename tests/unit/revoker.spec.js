@@ -1,7 +1,7 @@
 import { test } from '@japa/runner'
 import sinon from 'sinon'
 import { Revoker } from '#dist/index.js'
-import { BloomFilterManager } from '../dist/Bloom-filter-manager.js'
+import { BloomFilterManager } from '../../dist/Bloom-filter-manager.js'
 
 test.group('Revoker Constructor Validation Tests', (group) => {
   let logger

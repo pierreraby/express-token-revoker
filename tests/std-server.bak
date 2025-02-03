@@ -1,0 +1,140 @@
+// import { test } from '@japa/runner'
+// import sinon from 'sinon'
+// import * as grpc from '@grpc/grpc-js'
+// import {
+//   registerRevokerInstance,
+//   unregisterRevokerInstance,
+//   startServer,
+//   stopServerIfLastId
+// } from './build/std-server.js' // Adapte le chemin si nécessaire
+
+// // Mock Revoker pour les tests
+// class MockRevoker {
+//   constructor(id) {
+//     this.id = id
+//     this.logger = {
+//       info: sinon.spy(),
+//       error: sinon.spy()
+//     }
+//   }
+// }
+
+// test.group('Helper Functions', (group) => {
+//   group.each.setup(() => {
+//     // Réinitialise revokerInstances avant chaque test
+//     sinon.replace(globalThis, 'revokerInstances', new Map())
+//   })
+
+//   group.each.teardown(() => {
+//     sinon.restore()
+//   })
+
+//   test('registerRevokerInstance registers a revoker', ({ expect }) => {
+//     const revoker = new MockRevoker('test-id')
+//     registerRevokerInstance(revoker)
+//     expect(revokerInstances.has('test-id')).toBe(true)
+//     expect(revokerInstances.get('test-id')).toBe(revoker)
+//     expect(revoker.logger.info.calledOnce).toBe(true)
+//     expect(revoker.logger.info.calledWithExactly('Revoker instance test-id registered')).toBe(true)
+//   })
+
+//   test('registerRevokerInstance throws error if revokerInstances is null', ({ expect }) => {
+//     sinon.replace(globalThis, 'revokerInstances', null)
+//     const revoker = new MockRevoker('test-id')
+//     expect(() => registerRevokerInstance(revoker)).toThrow('Revoker instances map is not initialized')
+//   })
+
+//   test('unregisterRevokerInstance unregisters a revoker', ({ expect }) => {
+//     const revoker = new MockRevoker('test-id')
+//     revokerInstances.set('test-id', revoker)
+//     unregisterRevokerInstance('test-id')
+//     expect(revokerInstances.has('test-id')).toBe(false)
+//   })
+
+//   test('unregisterRevokerInstance throws error if revokerInstances is null', ({ expect }) => {
+//     sinon.replace(globalThis, 'revokerInstances', null)
+//     expect(() => unregisterRevokerInstance('test-id')).toThrow('Revoker instances map is not initialized')
+//   })
+// })
+
+// test.group('Server Start and Stop', (group) => {
+//   let logger
+//   let serverStub
+
+//   group.each.setup(() => {
+//     logger = {
+//       info: sinon.spy(),
+//       error: sinon.spy()
+//     }
+//     serverStub = {
+//       addService: sinon.stub(),
+//       bindAsync: sinon.stub(),
+//       start: sinon.stub(),
+//       tryShutdown: sinon.stub(),
+//       forceShutdown: sinon.stub()
+//     }
+//     sinon.stub(grpc, 'Server').returns(serverStub)
+//     sinon.replace(globalThis, 'revokerInstances', new Map())
+//   })
+
+//   group.each.teardown(() => {
+//     sinon.restore()
+//   })
+
+//   test('startServer starts the gRPC server', async ({ expect }) => {
+//     serverStub.bindAsync.callsArgWith(2, null, 50051)
+//     await startServer(50051, logger)
+//     expect(serverStub.bindAsync.calledOnce).toBe(true)
+//     expect(serverStub.bindAsync.calledWithExactly('0.0.0.0:50051', grpc.ServerCredentials.createInsecure(), sinon.match.func)).toBe(true)
+//     expect(logger.info.calledOnce).toBe(true)
+//     expect(logger.info.calledWithExactly('gRPC server listening on 50051')).toBe(true)
+//   })
+
+//   test('startServer returns error if server is not initialized', async ({ expect }) => {
+//     sinon.replace(globalThis, 'server', null)
+//     await expect(startServer(50051, logger)).rejects.toThrow('Server is not initialized')
+//   })
+
+//   test('startServer returns error if bindAsync fails', async ({ expect }) => {
+//     serverStub.bindAsync.callsArgWith(2, new Error('Bind failed'), null)
+//     await expect(startServer(50051, logger)).rejects.toThrow('Bind failed')
+//     expect(logger.error.calledOnce).toBe(true)
+//     expect(logger.error.calledWithExactly('Failed to bind server: Bind failed')).toBe(true)
+//   })
+
+//   test('stopServerIfLastId stops the server gracefully if it is the last instance', async ({ expect }) => {
+//     const revoker = new MockRevoker('test-id')
+//     registerRevokerInstance(revoker)
+//     unregisterRevokerInstance('test-id')
+//     serverStub.tryShutdown.callsArg(0)
+//     await stopServerIfLastId(logger)
+//     expect(serverStub.tryShutdown.calledOnce).toBe(true)
+//     expect(logger.info.calledOnce).toBe(true)
+//     expect(logger.info.calledWithExactly('Grpc server gracefully shutdown')).toBe(true)
+//   })
+
+//   test('stopServerIfLastId stops the server forcefully after timeout', async ({ expect }) => {
+//     const revoker = new MockRevoker('test-id')
+//     registerRevokerInstance(revoker)
+//     unregisterRevokerInstance('test-id')
+//     await stopServerIfLastId(logger, 100) // Timeout of 100ms
+//     expect(serverStub.forceShutdown.calledOnce).toBe(true)
+//     expect(logger.info.calledOnce).toBe(true)
+//     expect(logger.info.calledWithExactly('Grpc server forcefully shutdown')).toBe(true)
+//   })
+
+//   test('stopServerIfLastId does nothing if server is null', async ({ expect }) => {
+//     sinon.replace(globalThis, 'server', null)
+//     await stopServerIfLastId(logger)
+//     expect(serverStub.tryShutdown.notCalled).toBe(true)
+//     expect(serverStub.forceShutdown.notCalled).toBe(true)
+//   })
+
+//   test('stopServerIfLastId does nothing if revokerInstances is not empty', async ({ expect }) => {
+//     const revoker = new MockRevoker('test-id')
+//     registerRevokerInstance(revoker)
+//     await stopServerIfLastId(logger)
+//     expect(serverStub.tryShutdown.notCalled).toBe(true)
+//     expect(serverStub.forceShutdown.notCalled).toBe(true)
+//   })
+// })
