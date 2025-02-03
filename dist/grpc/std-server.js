@@ -38,6 +38,7 @@ let revokerInstances = new Map();
  * Registers a Revoker instance for management by gRPC.
  * @param {Revoker} revokerInstance - The Revoker instance to register.
  * @returns {void}
+ * @throws {Error} If the Revoker instances map is not initialized.
  */
 export function registerRevokerInstance(revokerInstance) {
   if (revokerInstances) {

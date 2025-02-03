@@ -152,12 +152,21 @@ export class Revoker {
    */
   async _grpcInit() {
     if (this.grpcEnabled && this.grpcPort) {
-      this.registerRevokerInstance(this);
       if (!Revoker.grpcServerStarted) {
         this.logger.info(`Starting gRPC server with id: ${this.id}`);
         this.logger.info(`grpcEnabled: ${this.grpcEnabled}`);
-        await startServer(this.grpcPort, this.logger);
-        Revoker.grpcServerStarted = true;
+        try {
+          await this.startServer(this.grpcPort, this.logger);
+          this.registerRevokerInstance(this);
+          Revoker.grpcServerStarted = true;
+        } catch (error) {
+          this.destroy(); // Cleanup
+          this.logger.error(`Failed to start gRPC server: ${error.message}`); // double log ???
+          throw new Error(`Failed to start gRPC server: ${error.message}`);
+        }
+      } else {
+        this.logger.info("gRPC server is already started.");
+        this.registerRevokerInstance(this);
       }
     }
     return this;
@@ -316,6 +325,8 @@ export class Revoker {
  * @param {Config} config - Configuration options.
  * @param {gRPCFunctions} [grpcFunctions] - Functions for gRPC server management.
  * @returns {Promise<Revoker>} The Revoker instance.
+ * @throws {Error} If the configuration is invalid.
+ * @throws {Error} If the gRPC server fails to start.
  */
 export async function createRevoker(config, grpcFunctions = {}) {
   const revoker = new Revoker(config, grpcFunctions);

@@ -22,8 +22,7 @@ const JWTconfig = { // this config uses ~21MB of memory
   }
 };
 
-const JWTrevoker = await createRevoker(JWTconfig);
-const JWTfilter = JWTrevoker.getMiddleware();
+
 
 const opaqueConfig = {
   id: "opaqueRevoker",
@@ -40,9 +39,6 @@ const opaqueConfig = {
   }
 };
 
-const opaqueRevoker = await createRevoker(opaqueConfig);
-const opaqueFilter = opaqueRevoker.getMiddleware();
-
 const opaqueConfigCustom = { // this config uses ~30MB of memory
   id: "opaqueRevokerCustom",
   opaqueHeader: "X-Auth-Token", // adding header where to check opaque token. (x-auth-api, etc)
@@ -56,7 +52,20 @@ const opaqueConfigCustom = { // this config uses ~30MB of memory
   }
 };
 
-const opaqueRevokerCustom = await createRevoker(opaqueConfigCustom);
-const opaqueFilterCustom = opaqueRevokerCustom.getMiddleware();
+let JWTrevoker, JWTfilter, opaqueRevoker, opaqueFilter, opaqueRevokerCustom, opaqueFilterCustom;
+
+try {
+  JWTrevoker = await createRevoker(JWTconfig);
+  JWTfilter = JWTrevoker.getMiddleware();
+  
+  opaqueRevoker = await createRevoker(opaqueConfig);
+  opaqueFilter = opaqueRevoker.getMiddleware();
+  
+  opaqueRevokerCustom = await createRevoker(opaqueConfigCustom);
+  opaqueFilterCustom = opaqueRevokerCustom.getMiddleware();
+} catch (error) {
+  logger.error(`Error creating revoker: ${error.message}`);
+}
+
 
 export { JWTrevoker, JWTfilter, opaqueRevoker, opaqueFilter, opaqueRevokerCustom, opaqueFilterCustom };
