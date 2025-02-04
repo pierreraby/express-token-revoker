@@ -3,6 +3,8 @@ import '../types.js';
 
 /**
  * @typedef {import('../types.js').GenericLogger} GenericLogger
+ * @typedef {import('../types.js').RevokerStore} RevokerStore
+ * @typedef {import('../index.js').Revoker} Revoker
  */
 
 import * as grpc from '@grpc/grpc-js';
@@ -26,69 +28,8 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition);
 const revokerProto = protoDescriptor.revoker;
 
-/**
- * @typedef {import('../index.js').Revoker} Revoker
- */
-
-// Use an object to store Revoker instances
-/** @type {Map<string, Revoker> | null} */
-let revokerInstances = new Map();
-
-/**
- * Registers a Revoker instance for management by gRPC.
- * @param {Revoker} revokerInstance - The Revoker instance to register.
- * @returns {void}
- * @throws {Error} If the Revoker instances map is not initialized.
- */
-export function registerRevokerInstance(revokerInstance) {
-  if (revokerInstances) {
-    revokerInstances.set(revokerInstance.id, revokerInstance);
-    revokerInstance.logger.info(`Revoker instance ${revokerInstance.id} registered`);
-  } else {
-    throw new Error('Revoker instances map is not initialized');
-  }
-}
-
-/**
- * Unregisters a Revoker instance from management by gRPC.
- * @param {string} revokerId - The ID of the Revoker instance to unregister.
- * @returns {void}
- */
-export function unregisterRevokerInstance(revokerId) {
-  if (revokerInstances) {
-    revokerInstances.delete(revokerId);
-  } else {
-    throw new Error('Revoker instances map is not initialized');
-  }
-}
-
 // Define error message because it is used in multiple places
 const REVOKER_OR_FILTER_NOT_FOUND_MSG = 'Revoker instance or Bloom filter not found';
-
-
-/**
- * Checks if a revokerInstance has a non-null bloomFilterManager.
- * @param {Revoker | undefined} revokerInstance
- * @returns {revokerInstance is Revoker & { bloomFilterManager: NonNullable<Revoker['bloomFilterManager']> }}
- */
-function hasNonNullableBloomFilterManager(revokerInstance) {
-  return !!revokerInstance && !!revokerInstance.bloomFilterManager;
-}
-
-/**
- * Finds a Revoker instance by ID.
- * @param {string} revokerId - The ID of the Revoker instance.
- * @param {GenericLogger} logger - The logger instance.
- * @returns {(Revoker & { bloomFilterManager: NonNullable<Revoker['bloomFilterManager']> }) | undefined}
- */
-function findRevokerInstance(revokerId, logger) {
-  const revokerInstance = revokerInstances ? revokerInstances.get(revokerId) : undefined;
-  if (!hasNonNullableBloomFilterManager(revokerInstance)) {
-    logger.error(REVOKER_OR_FILTER_NOT_FOUND_MSG);
-    return undefined;
-  }
-  return revokerInstance;
-}
 
 /**
  * Server Global variable
@@ -100,10 +41,11 @@ let server = null;
 /**
  * Starts the gRPC server.
  * @param {number} port - The port on which the server should listen.
+ * @param {RevokerStore} revokerStore - The RevokerStore instance.
  * @param {GenericLogger} logger - The logger instance.
  * @returns {Promise<void>}
  */
-export function startServer(port, logger) {
+export function startServer(port, revokerStore, logger) {
   /**
    * Implements the gRPC RevokerAdmin service.
    */
@@ -116,7 +58,7 @@ export function startServer(port, logger) {
      */
     Add: (call, callback) => {
       const { revokerId, item } = call.request;
-      const revokerInstance = findRevokerInstance(revokerId, logger);
+      const revokerInstance = revokerStore.findInstance(revokerId, logger);
       
       if (!revokerInstance) {
         return callback({ 
@@ -142,7 +84,7 @@ export function startServer(port, logger) {
      */
     Has: (call, callback) => {
       const { revokerId, item } = call.request;
-      const revokerInstance = findRevokerInstance(revokerId, logger);
+      const revokerInstance = revokerStore.findInstance(revokerId, logger);
       
       if (!revokerInstance) {
         return callback({ 
@@ -168,7 +110,7 @@ export function startServer(port, logger) {
      */
     GetMetrics: (call, callback) => {
       const { revokerId } = call.request;
-      const revokerInstance = findRevokerInstance(revokerId, logger);
+      const revokerInstance = revokerStore.findInstance(revokerId, logger);
       
       if (!revokerInstance) {
         return callback({ 
@@ -197,7 +139,7 @@ export function startServer(port, logger) {
      */
     ResetAndRestore: (call, callback) => {
       const { revokerId } = call.request;
-      const revokerInstance = findRevokerInstance(revokerId, logger);
+      const revokerInstance = revokerStore.findInstance(revokerId, logger);
       
       if (!revokerInstance) {
         return callback({ 
@@ -205,16 +147,17 @@ export function startServer(port, logger) {
           message: REVOKER_OR_FILTER_NOT_FOUND_MSG
         });
       }
-
-      const timeout = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout')), 5000)
+      let timeout;
+      const timeoutPromise = new Promise((_, reject) => 
+        timeout = setTimeout(() => reject(new Error('Timeout')), 5000)
       );
       
       Promise.race([
         revokerInstance.bloomFilterManager.resetAndRestore(),
-        timeout
+        timeoutPromise
       ]).then(() => {
         logger.info(`Bloom filter reset and restored for revoker ${revokerId}`);
+        clearInterval(timeout);
         callback(null, { code: grpc.status.OK, success: true, message: 'Bloom filter reset and restored' });
       }).catch(error => {
         logger.error(`Error resetting and restoring Bloom filter for revoker ${revokerId}: ${error.message}`);
@@ -229,7 +172,7 @@ export function startServer(port, logger) {
      */
       ResetAndClearData: (call, callback) => {
       const { revokerId } = call.request;
-      const revokerInstance = findRevokerInstance(revokerId, logger);
+      const revokerInstance = revokerStore.findInstance(revokerId, logger);
       
       if (!revokerInstance) {
         return callback({ 
@@ -237,16 +180,17 @@ export function startServer(port, logger) {
           message: REVOKER_OR_FILTER_NOT_FOUND_MSG
         });
       }
-
-      const timeout = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout')), 5000)
+      let timeout;
+      const timeoutPromise = new Promise((_, reject) => 
+        timeout = setTimeout(() => reject(new Error('Timeout')), 5000)
       );
       
       Promise.race([
         revokerInstance.bloomFilterManager.resetAndClearData(),
-        timeout
+        timeoutPromise
       ]).then(() => {
         logger.info(`Bloom filter reset and data cleared for revoker ${revokerId}`);
+        clearInterval(timeout);
         callback(null, { code: grpc.status.OK, success: true, message: 'Bloom filter reset and data cleared' }); 
       }).catch(error => {
         logger.error(`Error resetting and clearing data for Bloom filter for revoker ${revokerId}: ${error.message}`);
@@ -261,7 +205,7 @@ export function startServer(port, logger) {
      */
     ListRevokers: (call, callback) => {
       try {
-        const revokerIds = revokerInstances ? Array.from(revokerInstances.keys()) : [];
+        const revokerIds = revokerStore.listInstances();
         callback(null, { code: grpc.status.OK, revokerIds });
       } catch (error) {
         console.error(`Error listing revokers: ${error.message}`);
@@ -294,9 +238,8 @@ export function startServer(port, logger) {
    * @param {number} [timeout=5000] Timeout in ms to force shutdown
    * @returns {Promise<void>} 
    */
- export async function stopServerIfLastId(logger =console, timeout = 5000) {
-  if (server && revokerInstances && revokerInstances.size === 0) {
-    revokerInstances = null;
+ export async function stopServer(logger =console, timeout = 5000) {
+  if (server) {
     const currentServer = server;
 
     return new Promise((resolve) => {
