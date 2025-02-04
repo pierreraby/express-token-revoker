@@ -4,8 +4,9 @@ import { BloomFilterManager } from "./Bloom-filter-manager.js";
 import { createJWTMiddleware, createOpaqueMiddleware } from "./createMiddlewares.js";
 import { ValidationError, InternalError } from './errors.js';
 import throttle from "throttleit";
-import { stopServerIfLastId, registerRevokerInstance, startServer, unregisterRevokerInstance } from "./grpc/std-server.js";
+import { stopServer, startServer } from "./grpc/std-server.js";
 import { revokerInputSchema } from "./Inputs-validation.js";
+import RevokerStore from "./revokerStore.js";
 
 import './types.js';
 
@@ -41,13 +42,7 @@ export class Revoker {
   startServer;
 
   /** @types  {Function} */
-  registerRevokerInstance;
-
-  /** @types  {Function} */
-  unregisterRevokerInstance;
-
-  /** @types  {Function} */
-  stopServerIfLastId;
+  stopServer;
 
   /** @type {boolean} */
   static grpcServerStarted = false;
@@ -75,9 +70,7 @@ export class Revoker {
   /**
    * @typedef {Object} gRPCFunctions
    * @property {Function} [startServerFn] - Function to start the gRPC server.
-   * @property {Function} [registerRevokerInstanceFn] - Function to register a Revoker instance.
-   * @property {Function} [unregisterRevokerInstanceFn] - Function to unregister a Revoker instance.
-   * @property {Function} [stopServerIfLastIdFn] - Function to stop the gRPC server if the last ID is removed.
+   * @property {Function} [stopServerFn] - Function to stop the gRPC server if the last ID is removed.
    */
 
   /**
@@ -87,9 +80,7 @@ export class Revoker {
    */
   constructor(config, {
     startServerFn = startServer,
-    registerRevokerInstanceFn = registerRevokerInstance,
-    unregisterRevokerInstanceFn = unregisterRevokerInstance,
-    stopServerIfLastIdFn = stopServerIfLastId
+    stopServerFn = stopServer
     } = {}) 
   {
 
@@ -137,27 +128,23 @@ export class Revoker {
     this.grpcPort = grpcPort ? Number(grpcPort) : 0;
 
     this.startServer = startServerFn;
-    this.registerRevokerInstance = registerRevokerInstanceFn;
-    this.unregisterRevokerInstance = unregisterRevokerInstanceFn;
-    this.stopServerIfLastId = stopServerIfLastIdFn;
-
+    this.stopServer = stopServerFn;
 
   }
 
   /**
    * Initializes the grpc server.
    * @returns {Promise<Revoker>} The Revoker instance.
-   * @throws {Error} If the gRPC server is already started.
    * @throws {Error} If the gRPC server fails to start.
    */
   async _grpcInit() {
     if (this.grpcEnabled && this.grpcPort) {
       if (!Revoker.grpcServerStarted) {
         this.logger.info(`Starting gRPC server with id: ${this.id}`);
-        this.logger.info(`grpcEnabled: ${this.grpcEnabled}`);
         try {
-          await this.startServer(this.grpcPort, this.logger);
-          this.registerRevokerInstance(this);
+          RevokerStore.init();
+          await this.startServer(this.grpcPort, RevokerStore, this.logger);
+          RevokerStore.registerInstance(this);
           Revoker.grpcServerStarted = true;
         } catch (error) {
           this.destroy(); // Cleanup
@@ -166,7 +153,7 @@ export class Revoker {
         }
       } else {
         this.logger.info("gRPC server is already started.");
-        this.registerRevokerInstance(this);
+        RevokerStore.registerInstance(this);
       }
     }
     return this;
@@ -300,11 +287,14 @@ export class Revoker {
   async destroy() {
     try {
       if (this.grpcEnabled && Revoker.grpcServerStarted) {
-        this.unregisterRevokerInstance(this.id);
-        this.logger.info("Stopping gRPC server");
-        await this.stopServerIfLastId(this.logger);
+        RevokerStore.unregisterInstance(this.id);
         this.grpcEnabled = false;
-        Revoker.grpcServerStarted = false;
+        this.logger.info("Stopping gRPC server");
+        if (RevokerStore.isEmpty()) {
+          RevokerStore.destroy();
+          await this.stopServer(this.logger);
+          Revoker.grpcServerStarted = false;
+        }      
       }
       if (this.bloomFilterManager) {
         this.bloomFilterManager.destroy();

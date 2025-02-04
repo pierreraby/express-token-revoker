@@ -6,21 +6,21 @@ const TEST_PORT = 50052 // Choose a different port than the one used in producti
 const SERVER_ADDRESS = `localhost:${TEST_PORT}`
 
 test.group('gRPC Server Integration Tests', (group) => {
-  // let client
+  
   let logger
+  let jwtRevoker
+  let opaqueRevoker
+  let client
 
-  group.setup(() => {
+  group.setup(async () => {
     logger = {
       info: (...args) => console.log(...args),
       error: (...args) => console.error(...args),
       warn: (...args) => console.warn(...args),
       debug: (...args) => console.debug(...args)
     }
-  })
 
-  test('end-to-end scenario with JWT Revoker', async ({ expect }) => {
-    // Crée et enregistre une instance de Revoker
-    const jwtRevoker = await createRevoker({
+    jwtRevoker = await createRevoker({
       id: 'JWTrevoker',
       claimsToCheck: ['claim1'],
       payloadKey: 'token',
@@ -35,7 +35,30 @@ test.group('gRPC Server Integration Tests', (group) => {
       grpcPort: TEST_PORT
     })
 
-    const client = createRevokerClientAsync(SERVER_ADDRESS)
+    opaqueRevoker= await createRevoker({
+      id: 'opaqueRevoker',
+      opaqueHeader: 'Authorization',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.0001,
+        rotateTime: 10000,
+        backup: true
+      },
+      grpcEnabled: true,
+      grpcPort: TEST_PORT
+    })
+
+    client = createRevokerClientAsync(SERVER_ADDRESS)
+  })
+
+  group.teardown(async () => {
+    client.close()
+    await jwtRevoker.destroy()
+    await opaqueRevoker.destroy()
+  })
+
+  test('end-to-end scenario with JWT Revoker', async ({ expect }) => {    
 
     const item = 'item1'
 
@@ -65,27 +88,10 @@ test.group('gRPC Server Integration Tests', (group) => {
     const hasResponse3 = await client.has({ revokerId: 'JWTrevoker', item })
     expect(hasResponse3.exists).toBe(false) // Should be false after resetAndClearData
 
-    client.close()
-    await jwtRevoker.destroy()
+    
   })
 
   test('end-to-end scenario with Opaque Revoker', async ({ expect }) => {
-
-    const opaqueRevoker= await createRevoker({
-      id: 'opaqueRevoker',
-      opaqueHeader: 'Authorization',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.0001,
-        rotateTime: 10000,
-        backup: true
-      },
-      grpcEnabled: true,
-      grpcPort: TEST_PORT
-    })
-
-    const client = createRevokerClientAsync(SERVER_ADDRESS)
 
     const item = 'item2'
 
@@ -114,33 +120,12 @@ test.group('gRPC Server Integration Tests', (group) => {
 
     const hasResponse3 = await client.has({ revokerId: 'opaqueRevoker', item })
     expect(hasResponse3.exists).toBe(false) // Devrait être false après resetAndClearData
-
-    client.close()
-    await opaqueRevoker.destroy()
+    
   })
 
   test('returns error if revoker not found', async ({ expect }) => {
-    const jwtRevoker = await createRevoker({
-      id: 'JWTrevoker',
-      claimsToCheck: ['claim1'],
-      payloadKey: 'token',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.0001,
-        rotateTime: 10000,
-        backup: true
-      },
-      grpcEnabled: true,
-      grpcPort: TEST_PORT
-    })
-
-    const client = createRevokerClientAsync(SERVER_ADDRESS)
 
     await expect(client.add({ revokerId: 'unknownRevoker', item: 'item1' }))
       .rejects.toThrow('Revoker instance or Bloom filter not found')
-
-    client.close()
-    jwtRevoker.destroy()
   })
 })
