@@ -15,8 +15,6 @@ test.group('createRevoker Function Tests', (group) => {
     }
     // Stub gRPC server functions
     startServerStub = sinon.stub().resolves()
-    registerRevokerInstanceStub = sinon.stub()
-    unregisterRevokerInstance = sinon.stub()
     stopServerIfLastIdStub = sinon.stub().resolves()
   })
 
@@ -36,8 +34,6 @@ test.group('createRevoker Function Tests', (group) => {
       grpcPort: 50051
     }, {
       startServerFn: startServerStub,
-      registerRevokerInstanceFn: registerRevokerInstanceStub,
-      unregisterRevokerInstanceFn: unregisterRevokerInstance,
       stopServerIfLastIdFn: stopServerIfLastIdStub
     })
 

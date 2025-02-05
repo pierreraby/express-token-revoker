@@ -2,6 +2,7 @@ import { test } from '@japa/runner'
 import sinon from 'sinon'
 import { Revoker } from '#dist/index.js'
 import { BloomFilterManager } from '../../dist/Bloom-filter-manager.js'
+import RevokerStore from '../../dist/revokerStore.js'
 
 test.group('Revoker Constructor Validation Tests', (group) => {
   let logger
@@ -311,21 +312,23 @@ test.group('Revoker Constructor Validation Tests', (group) => {
     await revoker.destroy()
   });
 
-  // test('Constructor not throws error if all required parameters are provided for JWT', async ({ expect }) => {
-  //   expect(() => new Revoker({
-  //     id: 'test',
-  //     claimsToCheck: ['claim1'],
-  //     payloadKey: 'token',
-  //     logger,
-  //     filter: {
-  //       numItems: 1000,
-  //       fpRate: 0.01,
-  //       rotateTime: 2000
-  //     },
-  //     grpcEnabled: true,
-  //     grpcPort: '50051',
-  //   })).not.toThrow()
-  // });
+  test('Constructor not throws error if all required parameters are provided for JWT', async ({ expect }) => {
+    let revoker;
+    expect(() => revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
+      grpcEnabled: true,
+      grpcPort: 50051,
+    })).not.toThrow()
+    await revoker.destroy()
+  });
 
   test('Constructor not throws error if all required parameters are provided for Opaque', ({ expect }) => {
     expect(() => new Revoker({
@@ -388,6 +391,87 @@ test.group('Revoker Class Tests', (group) => {
     // destroySpy.restore();
     sinon.restore();
   })
+
+  test('grpcInit method do nothing if grpcEnabled is false', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
+      grpcEnabled: false,
+    })
+
+    await revoker._grpcInit()
+    expect(Revoker.grpcServerStarted).toBe(false)
+    await revoker.destroy()
+  })
+
+  test('grpcInit method do nothing if grpcEnabled is omitted', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
+    })
+
+    await revoker._grpcInit()
+    expect(Revoker.grpcServerStarted).toBe(false)
+    await revoker.destroy()
+  })
+
+  test('grpcInit method starts gRPC server if grpcEnabled is true', async ({ expect }) => {
+    const startServerSpy = sinon.spy();
+    const stopServerSpy = sinon.spy();
+
+    const revokerStore = {
+      init : sinon.spy(),
+      registerInstance : sinon.spy(),
+      unregisterInstance : sinon.spy(),
+      isEmpty: sinon.spy()
+    }
+
+    const revoker = new Revoker({
+        id: 'test',
+        claimsToCheck: ['claim1'],
+        payloadKey: 'token',
+        logger,
+        filter: {
+          numItems: 1000,
+          fpRate: 0.01,
+          rotateTime: 2000
+        },
+        grpcEnabled: true,
+        grpcPort: 50051
+      },
+      {
+        startServerFn: startServerSpy,
+        stopServerFn: stopServerSpy
+      },
+      revokerStore
+    )
+
+    await revoker._grpcInit()
+    expect(revokerStore.init.calledOnce).toBe(true)
+    expect(startServerSpy.calledOnceWithExactly(50051, RevokerStore, logger)).toBe(true)
+    expect(revokerStore.registerInstance.calledOnceWithExactly(revoker)).toBe(true)
+    expect(Revoker.grpcServerStarted).toBe(true)
+    await revoker.destroy()
+  })
+
+
+
+
+
   test('add method handles empty or invalid input', async ({ expect }) => {
     const revoker = new Revoker({
       id: 'test',
