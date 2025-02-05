@@ -192,6 +192,37 @@ test.group('Middleware Tests', (group) => {
     expect(res.json.called).toBe(false)
   })
 
+  test('Opaque Middleware - request with multiple Authorization headers', ({ expect }) => {
+    const middleware = createOpaqueMiddleware('Authorization', manager, logger, throttleLog);
+    req = {
+      headers: {
+        authorization
+        : ['Bearer validToken', 'Bearer validToken2']
+      }
+    }
+
+    middleware(req, res, next)
+
+    expect(next.calledOnce).toBe(true)
+    expect(res.status.called).toBe(false)
+    expect(res.json.called).toBe(false)
+  })
+
+  test('Opaque Middleware - request with multiple custom headers', ({ expect }) => {
+    const middleware = createOpaqueMiddleware('X-Custom-Token', manager, logger, throttleLog);
+    req = {
+      headers: {
+        'x-custom-token': ['validToken', 'validToken2']
+      }
+    }
+
+    middleware(req, res, next)
+
+    expect(next.calledOnce).toBe(true)
+    expect(res.status.called).toBe(false)
+    expect(res.json.called).toBe(false)
+  })
+
   test('Opaque Middleware - missing Authorization header', ({ expect }) => {
     const middleware = createOpaqueMiddleware('Authorization', manager, logger, throttleLog);
     

@@ -1,3 +1,3 @@
 {
-  "exclude": ["dist/bloomfilter.js", "**/tests/**"]
+  "exclude": ["dist/bloomfilter.js", "dist/grpc/*", "**/tests/**"]
 }
