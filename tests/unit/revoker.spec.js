@@ -703,6 +703,44 @@ test.group('Revoker Class Tests', (group) => {
     await revoker.destroy()
   })
 
+  test('has method throws error when gRPC is enabled', async ({ expect }) => {
+    let revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
+      grpcEnabled: true,
+      grpcPort: 50051
+    })
+    await revoker._grpcInit()
+    expect(() => revoker.has('test')).toThrow('gRPC is enabled, use the gRPC method instead')
+    await revoker.destroy()
+  })
+
+  test('has method handles empty or invalid input', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      opaqueHeader: 'Authorization',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })
+
+    expect(() => revoker.has('')).toThrow('Value must be a non-empty string')
+    expect(() => revoker.has(null)).toThrow('Value must be a non-empty string')
+    expect(() => revoker.has(undefined)).toThrow('Value must be a non-empty string')
+
+    await revoker.destroy()
+  })
+
   test('getMetrics calls bloomFilterManager.getMetrics', async ({ expect }) => {
     const revoker = new Revoker({
       id: 'test',
@@ -741,6 +779,66 @@ test.group('Revoker Class Tests', (group) => {
     await revoker.destroy()
   })
 
+  // test('getMetrics logs error if getMetrics fails', async ({ expect }) => {
+  //   const revoker = new Revoker({
+  //     id: 'test',
+  //     claimsToCheck: ['claim1'],
+  //     payloadKey: 'token',
+  //     logger,
+  //     filter: {
+  //       numItems: 1000,
+  //       fpRate: 0.01,
+  //       rotateTime: 2000
+  //     }
+  //   })
+
+  //   const getMetricsStub = sinon.stub(revoker.bloomFilterManager, 'getMetrics').throws(new Error('Get metrics failed'))
+  //   expect(() => revoker.getMetrics()).toThrow('Get metrics failed')
+  //   expect(getMetricsStub.calledOnce).toBe(true)
+  //   expect(logger.error.calledOnce).toBe(true)
+  //   expect(logger.error.firstCall.args[0]).toBe('Error in Revoker.getMetrics:')
+  //   expect(logger.error.firstCall.args[1].message).toBe('Get metrics failed')
+  //   await revoker.destroy()
+  // })
+
+  test('reset and restore method throw error when bloomFilterManager is null', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })
+    revoker.bloomFilterManager.destroy()
+    revoker.bloomFilterManager = null; // Simulate a null manager
+    await expect(revoker.resetAndRestore()).rejects.toThrow('Bloom filter manager not initialized');
+    await revoker.destroy()
+  })
+
+  test('resetAndRestore calls bloomFilterManager.resetAndRestore', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })
+
+    const resetAndRestoreStub = sinon.stub(revoker.bloomFilterManager, 'resetAndRestore').resolves()
+    logger.info.resetHistory()
+    await revoker.resetAndRestore()
+    expect(resetAndRestoreStub.calledOnce).toBe(true)
+    expect(logger.info.calledOnceWithExactly('Bloom filter has been reset and restored successfully.')).toBe(true)
+    await revoker.destroy()
+  })
 
   test('resetAndRestore calls bloomFilterManager.resetAndRestore and logs error if resetAndRestore fails', async ({ expect }) => {
     const revoker = new Revoker({
@@ -761,6 +859,44 @@ test.group('Revoker Class Tests', (group) => {
     expect(logger.error.calledOnce).toBe(true)
     expect(logger.error.firstCall.args[0]).toBe('Error in Revoker.resetAndRestore:')
     expect(logger.error.firstCall.args[1].message).toBe('Reset failed')
+    await revoker.destroy()
+  })
+
+  test('resetAndRestore throws error when gRPC is enabled', async ({ expect }) => {
+    let revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
+      grpcEnabled: true,
+      grpcPort: 50051
+    })
+    await revoker._grpcInit()
+    await expect(() => revoker.resetAndRestore()).rejects.toThrow('gRPC is enabled, use the gRPC method instead')
+    await revoker.destroy()
+  })
+
+  test('resetAndClearData throws error when gRPC is enabled', async ({ expect }) => {
+    let revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      },
+      grpcEnabled: true,
+      grpcPort: 50051
+    })
+    await revoker._grpcInit()
+    await expect(() => revoker.resetAndClearData()).rejects.toThrow('gRPC is enabled, use the gRPC method instead')
     await revoker.destroy()
   })
 
@@ -786,7 +922,7 @@ test.group('Revoker Class Tests', (group) => {
     await revoker.destroy()
   })
 
-  test('ResetAndClearData logs error when bloomFilterManager is null', async ({ expect }) => {
+  test('ResetAndClearData trhow error when bloomFilterManager is null', async ({ expect }) => {
     const revoker = new Revoker({
       id: 'test',
       claimsToCheck: ['claim1'],
@@ -801,6 +937,27 @@ test.group('Revoker Class Tests', (group) => {
     revoker.bloomFilterManager.destroy()
     revoker.bloomFilterManager = null; // Simulate a null manager
     await expect(async () => await revoker.resetAndClearData()).rejects.toThrow('Bloom filter manager not initialized');
+    await revoker.destroy()
+  })
+
+  test('resetAndClearData calls bloomFilterManager.resetAndClearData', async ({ expect }) => {
+    const revoker = new Revoker({
+      id: 'test',
+      claimsToCheck: ['claim1'],
+      payloadKey: 'token',
+      logger,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.01,
+        rotateTime: 2000
+      }
+    })
+
+    const resetAndClearDataStub = sinon.stub(revoker.bloomFilterManager, 'resetAndClearData').resolves()
+    logger.info.resetHistory()
+    await revoker.resetAndClearData()
+    expect(resetAndClearDataStub.calledOnce).toBe(true)
+    expect(logger.info.calledOnceWithExactly('Bloom filter has been reset and data cleared successfully.')).toBe(true)
     await revoker.destroy()
   })
 
@@ -824,24 +981,6 @@ test.group('Revoker Class Tests', (group) => {
     expect(logger.error.firstCall.args[0]).toBe('Error during Revoker destruction:')
     expect(logger.error.firstCall.args[1].message).toBe('Destroy failed')
     destroyStub.restore()
-    await revoker.destroy()
-  })
-
-  test('reset method handles null bloomFilterManager', async ({ expect }) => {
-    const revoker = new Revoker({
-      id: 'test',
-      claimsToCheck: ['claim1'],
-      payloadKey: 'token',
-      logger,
-      filter: {
-        numItems: 1000,
-        fpRate: 0.01,
-        rotateTime: 2000
-      }
-    })
-    revoker.bloomFilterManager.destroy()
-    revoker.bloomFilterManager = null; // Simulate a null manager
-    await expect(revoker.resetAndRestore()).rejects.toThrow('Bloom filter manager not initialized');
     await revoker.destroy()
   })
 
