@@ -18,7 +18,7 @@ const JWTconfig = { // this config uses ~21MB of memory
     fpRate: 0.000001, // one in a million
     rotateTime: 10 * 60000, // 10 minutes
     backup: true,
-    backupTime: 5 * 60000, // 5 minutes
+    backupRatioTime: 2 // 5 minutes (rotateTime / backupRatioTime)
   }
 };
 
@@ -35,7 +35,7 @@ const opaqueConfig = {
     fpRate: 0.000001,
     rotateTime: 30 * 60000, // 30 minutes
     backup: true,
-    backupTime: 5 * 60000, // 5 minute
+    backupRatioTime: 3 // 10 minutes (rotateTime / backupRatioTime)
   }
 };
 
@@ -48,7 +48,7 @@ const opaqueConfigCustom = { // this config uses ~30MB of memory
     fpRate: 0.000001,
     rotateTime: 30 * 60000, // 30 minutes
     backup: true,
-    backupTime: 5 * 60000, // 5 minute
+    backupRatioTime: 3 // 10 minutes (rotateTime / backupRatioTime)
   }
 };
 

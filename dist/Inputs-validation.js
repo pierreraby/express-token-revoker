@@ -73,13 +73,12 @@ const filterInputSchema = Joi.object({
   backup: Joi.boolean()
     .strict()
     .description('Enable backup filter'),
-  backupTime: Joi.number()
+  backupRatioTime: Joi.number()
     .positive()
     .integer()
     .when('backup', { not: Joi.exist(), then: Joi.forbidden() })
     .when('backup', { is: false, then: Joi.forbidden() })
-    .less(Joi.ref('rotateTime'))
-    .description('Time to rotate the backup filter in milliseconds'),
+    .description('Ratio of the rotation time for backups'),
 });  
 
 
