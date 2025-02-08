@@ -300,9 +300,10 @@ export class Revoker {
     try {
       if (this.grpcEnabled && Revoker.grpcServerStarted) {
         this.revokerStore.unregisterInstance(this.id);
+        this.logger.info(`unregistering instance : ${this.id}`);
         this.grpcEnabled = false;
-        this.logger.info("Stopping gRPC server");
         if (this.revokerStore.isEmpty()) {
+          this.logger.info("Stopping gRPC server");
           this.revokerStore.destroy();
           await this.stopServer(this.logger);
           Revoker.grpcServerStarted = false;
