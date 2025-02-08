@@ -57,7 +57,8 @@ export class Revoker {
    * @property {number} fpRate - Target false positive rate for the Bloom filter
    * @property {number} rotateTime - Rotation interval in milliseconds
    * @property {boolean} [backup] - whether to enable backup
-   * @property {number} [backupTime] - Backup interval in milliseconds
+   * @property {number} [backupRatioTime] - Ratio of the rotation time for backups (e.g., 4 for backup every rotateTime / 4).  Defaults to no backups.
+   * @property {string} [backupDir] - The absolute path to the backup directory.  Defaults to a 'backup' directory relative to the current file.
    */
   
   /**

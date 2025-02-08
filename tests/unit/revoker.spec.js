@@ -357,7 +357,7 @@ test.group('Revoker Constructor Validation Tests', (group) => {
         fpRate: 0.01,
         rotateTime: 2000,
         backup: true,
-        backupTime: 1000
+        backupRatioTime: 2
       }
     })
 
@@ -366,7 +366,7 @@ test.group('Revoker Constructor Validation Tests', (group) => {
     expect(revoker.bloomFilterManager.fpRate).toBe(0.01)
     expect(revoker.bloomFilterManager.rotateTime).toBe(2000)
     expect(revoker.bloomFilterManager.backupEnabled).toBe(true)
-    expect(revoker.bloomFilterManager.backupTime).toBe(1000)
+    expect(revoker.bloomFilterManager.backupRatioTime).toBe(2)
     await revoker.destroy()
   })
 
