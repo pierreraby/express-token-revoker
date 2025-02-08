@@ -515,8 +515,10 @@ export class BloomFilterManager {
       throw new ValidationError('Value must be a non-empty string');
     }
     try {
-      // Synchronous append to the temporary file
-      fs.appendFileSync(this.backupTempFilePath, `${filterItem}\n`);
+      if (this.backupEnabled) {
+        // Synchronous append to the temporary file
+        fs.appendFileSync(this.backupTempFilePath, `${filterItem}\n`);
+      }
       this.current?.add(filterItem);
     } catch (error) {
       throw new InternalError(`Failed to add value to Bloom filter: ${error.message}`);
