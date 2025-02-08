@@ -3,6 +3,7 @@ import sinon from 'sinon'
 import { Revoker } from '#dist/index.js'
 import { BloomFilterManager } from '../../dist/Bloom-filter-manager.js'
 import RevokerStore from '../../dist/revokerStore.js'
+import e from 'express'
 
 test.group('Revoker Constructor Validation Tests', (group) => {
   let logger
@@ -1178,6 +1179,8 @@ test.group('Revoker Class Tests', (group) => {
 
     await revoker.destroy()
     expect(destroySpy.calledOnce).toBe(true)
+    expect(revoker.bloomFilterManager).toBeNull()
+    expect(revoker.middleware).toBeNull()
     destroySpy.restore()
   })
 
