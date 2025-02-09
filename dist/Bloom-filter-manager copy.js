@@ -790,9 +790,9 @@ export class BloomFilterManager {
    */
   async resetAndClearData() {
     try {
-      await this.#deleteBackupFile(this.backupCurrentPath, 'Current');
-      await this.#deleteBackupFile(this.backupPreviousPath, 'Previous');
-      await this.#deleteBackupFile(this.backupTempFilePath, 'Temporary');
+      this.#deleteBackupFile(this.backupCurrentPath, 'Current');
+      this.#deleteBackupFile(this.backupPreviousPath, 'Previous');
+      this.#deleteBackupFile(this.backupTempFilePath, 'Temporary');
       this.hasRotated = false;
       await this.resetAndRestore();
     } catch (error) {

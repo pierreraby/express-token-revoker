@@ -3,18 +3,10 @@
 // BloomFilterManager.js
 import { InternalError, ValidationError } from './errors.js';
 import { BloomFilter } from './bloomfilter.js';
-import fs from 'fs';
-import path from 'path';
-import { dirname } from 'path';
-import { fileURLToPath } from 'url';
 import { Mutex } from 'async-mutex';
 import { filterInputSchema } from './Inputs-validation.js';
 import { BloomFilterFactory } from './BloomFilterFactory.js';
 import { BloomFilterBackupManager } from './BloomFilterBackupManager.js';
-
-// Define __filename and __dirname
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 // Redefinition of the GenericLogger type to keep the BloomFilterManager class independent
 /**
@@ -37,6 +29,12 @@ const __dirname = dirname(__filename);
  * @property {GenericLogger} logger - Any logger implementing the basic logging methods
  */
 
+/**
+ * @class BloomFilterManager
+ * @classdesc Manages the bloom filters and their rotation.
+ * @public
+ * @export BloomFilterManager
+ */
 export class BloomFilterManager {
 
    /**
@@ -101,7 +99,7 @@ export class BloomFilterManager {
       throw new ValidationError(`Invalid input: ${error.message}`);
     }
 
-    const { numItems, fpRate, rotateTime, id, backup, backupRatioTime, logger } = options;
+    const { numItems, fpRate, rotateTime, id, logger } = options;
 
     this.id = id;
     this.numItems = numItems;
@@ -116,20 +114,37 @@ export class BloomFilterManager {
     );
 
     this.current = BloomFilterFactory.create(this.numItems, this.fpRate);
-    this.backupManager = new BloomFilterBackupManager(options, this.logger);
+    this.backupManager = new BloomFilterBackupManager(options, this.current.k, this.logger);
 
     this.#startRotationInterval();
-    if (this.backupManager.backupEnabled) {
-      this.#startBackup();
-    }
 
+    if (this.backupManager.backupEnabled) { 
+      this.#restoreBackup();
+      if (this.backupManager.backupRatioTime) {
+        this.backupManager.startBackupInterval(this.current);
+      }
+    }
   }
 
   // Note: not testing private methods
   /* c8 ignore start */
 
  /**
-  * Initializes the timer intervals for filter rotation and backup.
+  * Initializes the backup manager and restores the filters from the backup if it exists.
+  * @returns {void} 
+  */
+  #restoreBackup() {
+    if (this.backupManager.backupExists()) {
+      const restoredFilters = this.backupManager.restore('all');
+      if (restoredFilters) {
+        this.current = restoredFilters.current;
+        this.previous = restoredFilters.previous;
+      }
+    }
+  }
+
+ /**
+  * Initializes the timer intervals for filter rotation
   * @returns {void}
   */
   #startRotationInterval() {
@@ -142,7 +157,7 @@ export class BloomFilterManager {
    * Stops the Bloom filter rotation interval.
    * @returns {void}
    */
- #stopRotation() {
+ #stopRotationInterval() {
   if (this.rotationInterval !== null) {
     clearInterval(this.rotationInterval);
     this.rotationInterval = null;
@@ -190,14 +205,14 @@ export class BloomFilterManager {
         this.hasRotated = true;
       }
       this.logger.debug('Rotating Bloom filters...');
-      if (this.backupManager.backupEnabled) {
-        await this.backupManager.backupLocal('current');
-        if (fs.existsSync(this.backupManager.backupCurrentPath)) {
-          fs.renameSync(this.backupManager.backupCurrentPath, this.backupManager.backupPreviousPath); // Vous pourriez envisager de gérer les erreurs ici également
-        }
+      if (this.backupManager.backupEnabled && this.current) {
+        await this.backupManager.backupRotate(this.current);
       }
       this.previous = this.current;
       this.current = BloomFilterFactory.create(this.numItems, this.fpRate);
+      // reinitialize the backup interval with the new filter
+      this.backupManager.stopBackupInterval();
+      this.backupManager.startBackupInterval(this.current);
     } catch (error) {
       throw new InternalError(`Failed to rotate filters: ${error.message}`);
     } finally {
@@ -331,14 +346,17 @@ export class BloomFilterManager {
   async resetAndRestore() {
     const release = await this.mutex.acquire();
     try {
+      this.#stopRotationInterval();
       this.previous = null;
       this.current = BloomFilterFactory.create(this.numItems, this.fpRate);
-      this.#stopRotation();
-      this.backupManager.stopBackup();
-      this.logger.debug('Bloom filters reset');
       this.#startRotationInterval();
+      this.logger.debug('Bloom filters reset');
       if (this.backupManager.backupEnabled) {
-        this.backupManager.startBackup();
+        this.backupManager.stopBackupInterval();
+        this.#restoreBackup();
+        if (this.backupManager.backupRatioTime) {
+          this.backupManager.startBackupInterval(this.current);
+        }
       }
     } catch (error) {
       throw new InternalError(`Failed to reset and restore: ${error.message}`);
@@ -353,17 +371,14 @@ export class BloomFilterManager {
    * @throws {InternalError} If an error occurs while resetting the filters.
    */
   async resetAndClearData() {
-    const release = await this.mutex.acquire();
     try {
-        await this.backupManager.deleteBackupFile(this.backupManager.backupCurrentPath, 'Current');
-        await this.backupManager.deleteBackupFile(this.backupManager.backupPreviousPath, 'Previous');
-        await this.backupManager.deleteBackupFile(this.backupManager.backupTempFilePath, 'Temporary');
+        this.backupManager.deleteBackupFile(this.backupManager.backupCurrentPath, 'Current');
+        this.backupManager.deleteBackupFile(this.backupManager.backupPreviousPath, 'Previous');
+        this.backupManager.deleteBackupFile(this.backupManager.backupTempFilePath, 'Temporary');
         this.hasRotated = false;
-        await this.resetAndRestore(); // Réutiliser resetAndRestore
+        await this.resetAndRestore(); // Reuse resetAndRestore
     } catch (error) {
         throw new InternalError(`Failed to reset and clear data: ${error.message}`);
-    } finally {
-        release();
     }
 }
 
@@ -372,8 +387,8 @@ export class BloomFilterManager {
    * @returns {void}
    */
   destroy() {
-    this.#stopRotation();
-    this.backupManager.stopBackup();
+    this.#stopRotationInterval();
+    this.backupManager.stopBackupInterval();
     this.previous = null;
     this.current = null;
     this.logger.debug('BloomFilterManager destroyed.');
