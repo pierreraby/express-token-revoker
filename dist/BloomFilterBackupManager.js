@@ -40,11 +40,6 @@ export class BloomFilterBackupManager {
   backupInterval = null;
 
   /**
-  * @type {boolean}
-  */
-  backupEnabled;
-
-  /**
   * @type {number}
   */
   backupRatioTime;
@@ -83,16 +78,30 @@ export class BloomFilterBackupManager {
   backupTempFilePath;
 
  /**
-  * number of hash functions
+  * @type {boolean}
+  */
+  bufferActive;
+
+ /**
+  * @type {Array<string>}
+  */
+  writeBuffer;
+
+ /**
+  * @type {NodeJS.Timeout | null}
+  */
+  writeInterval;
+
+ /**
   * @type {number}
   */
- k;
+  bufferFlushInterval;
 
   /**
   * @private
   * @type {Mutex}
   */
-   mutex
+  mutex
 
  /**
   * @typedef {Object} FilterParams
@@ -108,7 +117,6 @@ export class BloomFilterBackupManager {
   */
   constructor(options, filterParams, logger) {
       this.id = options.id;
-      this.backupEnabled = options.backup ?? false;
       this.backupRatioTime = options.backupRatioTime ?? 0;
       this.rotateTime = options.rotateTime;
       this.backupInterval = null;
@@ -122,14 +130,26 @@ export class BloomFilterBackupManager {
 
       this.mutex = new Mutex();
       
+      this.bufferActive = true;
       this.writeBuffer = []; 
       this.writeInterval = null;
       this.bufferFlushInterval = 1000;
       
-      this.#ensureBackupDirExists();
+      this.#init();
+
   }
 
-
+ /**
+  * Ensures that the backup directory exists.
+  * @returns {void}
+  * @throws {InternalError} If an error occurs while creating the backup directory.
+  */
+ #init() {
+  this.#ensureBackupDirExists();
+  if (this.bufferActive) {
+    this.writeInterval = setInterval(() => this.#flushWriteBuffer(), this.bufferFlushInterval);
+  }
+ }
 
  /**
   * Ensures that the backup directory exists.
@@ -215,12 +235,53 @@ export class BloomFilterBackupManager {
   }
 
  /**
+  * Stops the Bloom filter rotation interval.
+  * @returns {void}
+  */
+  stoptWriteInterval() {
+    if (this.writeInterval !== null) {
+      clearInterval(this.writeInterval);
+      this.writeInterval = null;
+      this.logger.debug(`Rotation stopped for id: ${this.id}`);
+    }
+  }
+
+ /**
   * Backup the filter 
   * @param {string} filterItem - The value to add.
   * @returns {void}
   */
   backupItem(filterItem) {
-    fs.appendFileSync(this.backupTempFilePath, `${filterItem}\n`);
+    if (this.bufferActive) {
+      this.writeBuffer.push(filterItem);
+      // if (this.writeBuffer.length >= MAX_BUFFER_SIZE) {
+      //   this.#flushWriteBuffer();
+      // }
+    } else {
+      fs.appendFileSync(this.backupTempFilePath, `${filterItem}\n`);
+    }
+  }
+
+ /**
+  * Flushes the write buffer to the temp file.
+  * @returns {Promise<void>}
+  * @throws {InternalError} If an error occurs while writing to the temp file.
+  */
+  async #flushWriteBuffer() {
+    if (this.writeBuffer.length === 0) {
+      return;
+    }
+    const data = this.writeBuffer.join('\n') + '\n';
+    this.writeBuffer = []; // Vider le buffer AVANT l'écriture
+    try {
+      await fs.promises.appendFile(this.backupTempFilePath, data);
+      this.logger.debug(`Buffer flushed for instance ${this.id}`);
+    } catch (error) {
+      this.logger.error('Error writing to temp file:', error);
+      // Handle the error (e.g., retry later, or stop the backup)
+      // IMPORTANT: If the write fails, the data is *lost*.
+      // You might consider putting it back into the buffer, but be cautious of infinite loops.
+    }
   }
 
 
@@ -337,7 +398,7 @@ export class BloomFilterBackupManager {
       try {
         const buffer = fs.readFileSync(filePath);
         const buckets = new Int32Array(buffer.buffer, buffer.byteOffset, buffer.length / Int32Array.BYTES_PER_ELEMENT);
-        const restoredFilter = BloomFilterFactory.createFromBuckets(buckets, this.k);
+        const restoredFilter = BloomFilterFactory.createFromBuckets(buckets, this.filterParams.k);
         this.logger.debug(`Restored ${filterName} filter : id ${this.id}`);
         return restoredFilter;
       } catch (error) {
@@ -405,7 +466,7 @@ export class BloomFilterBackupManager {
     // #backup, #backupLocal, #restore, #restoreTemp, #deleteBackupFile,
     // #ensureBackupDirExists, #tempFileExistsAndNotEmpty, #flushWriteBuffer (pour l'écriture bufferisée)
 
-    async #flushWriteBuffer() { /* ... */ } // Implémentation de l'écriture asynchrone par lots
+    //async #flushWriteBuffer() { /* ... */ } // Implémentation de l'écriture asynchrone par lots
     //startBackupInterval() { /* ... */ } // Méthode pour démarrer l'intervalle de backup
     //stopBackup() { /* ... */ } // Méthode pour arrêter l'intervalle de backup
     async appendToTempFile(data) { /* ... */ } // Méthode pour ajouter des données au buffer

@@ -61,6 +61,8 @@ try {
   console.log('Estimated Metrics:', estimatedMetrics);
   console.log('Configuration:', configuration);
 
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+
   // Example of calling the ResetAndRestore method
   const resetRestoreResponse = await clientAsync.resetAndRestore({ revokerId });
   console.log('ResetAndRestore Response:', resetRestoreResponse);
@@ -100,6 +102,8 @@ try {
   const configuration = metricsResponse.configuration;
   console.log('Estimated Metrics:', estimatedMetrics);
   console.log('Configuration:', configuration);
+
+  await new Promise((resolve) => setTimeout(resolve, 1500));
 
   // Example of calling the ResetAndRestore method
   const resetRestoreResponse = await clientAsync.resetAndRestore({ revokerId });
