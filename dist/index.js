@@ -59,6 +59,7 @@ export class Revoker {
    * @property {boolean} [backup] - whether to enable backup
    * @property {number} [backupRatioTime] - Ratio of the rotation time for backups (e.g., 4 for backup every rotateTime / 4).  Defaults to no backups.
    * @property {string} [backupDir] - The absolute path to the backup directory.  Defaults to a 'backup' directory relative to the current file.
+   * @property {boolean} [bufferEnabled] - Whether to enable buffering of items to add to the Bloom filter.  Defaults to false.
    */
   
   /**

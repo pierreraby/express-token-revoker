@@ -44,6 +44,12 @@ export class BloomFilterBackupManager {
   */
   backupRatioTime;
 
+//  /**
+//   * @private
+//   * @type {number}
+//   */ 
+//   remainingbackup;
+
   /**
   * @private
   * @type {GenericLogger}
@@ -78,21 +84,25 @@ export class BloomFilterBackupManager {
   backupTempFilePath;
 
  /**
+  * @private
   * @type {boolean}
   */
-  bufferActive;
+  bufferEnabled;
 
  /**
+  * @private
   * @type {Array<string>}
   */
   writeBuffer;
 
  /**
+  * @private
   * @type {NodeJS.Timeout | null}
   */
   writeInterval;
 
  /**
+  * @private
   * @type {number}
   */
   bufferFlushInterval;
@@ -120,17 +130,18 @@ export class BloomFilterBackupManager {
       this.backupRatioTime = options.backupRatioTime ?? 0;
       this.rotateTime = options.rotateTime;
       this.backupInterval = null;
+      // this.remainingbackup = this.backupRatioTime ? this.backupRatioTime - 1 : 0; //number of backup remaining before rotation
       this.logger = logger;
       this.filterParams = filterParams
 
-      this.backupDir = options.backupDir || path.resolve(__dirname, '../backup'); //Utiliser resolve
+      this.backupDir = options.backupDir || path.resolve(__dirname, '../backup');
       this.backupCurrentPath = path.join(this.backupDir, `current-${this.id}.blob`);
       this.backupPreviousPath = path.join(this.backupDir, `previous-${this.id}.blob`);
       this.backupTempFilePath = path.join(this.backupDir, `temp-${this.id}.txt`);
 
       this.mutex = new Mutex();
       
-      this.bufferActive = true;
+      this.bufferEnabled = options.bufferEnabled ?? false;
       this.writeBuffer = []; 
       this.writeInterval = null;
       this.bufferFlushInterval = 1000;
@@ -146,7 +157,7 @@ export class BloomFilterBackupManager {
   */
  #init() {
   this.#ensureBackupDirExists();
-  if (this.bufferActive) {
+  if (this.bufferEnabled) {
     this.writeInterval = setInterval(() => this.#flushWriteBuffer(), this.bufferFlushInterval);
   }
  }
@@ -217,8 +228,13 @@ export class BloomFilterBackupManager {
   * @throws {InternalError} If an error occurs while backing up the filter.
   */
   startBackupInterval(filter) {
+    let remainingbackup = this.backupRatioTime - 1; //number of backup remaining before rotation
+
     this.backupInterval = setInterval(async () => {
-      await this.#backupWithRetry(filter);
+      if (remainingbackup > 0) {
+        await this.#backupWithRetry(filter);
+        remainingbackup--;
+      }
     }, this.rotateTime / this.backupRatioTime);
   }
 
@@ -252,7 +268,7 @@ export class BloomFilterBackupManager {
   * @returns {void}
   */
   backupItem(filterItem) {
-    if (this.bufferActive) {
+    if (this.bufferEnabled) {
       this.writeBuffer.push(filterItem);
       // if (this.writeBuffer.length >= MAX_BUFFER_SIZE) {
       //   this.#flushWriteBuffer();
@@ -283,7 +299,6 @@ export class BloomFilterBackupManager {
       // You might consider putting it back into the buffer, but be cautious of infinite loops.
     }
   }
-
 
   /**
    * Checks if the temp file exists and is not empty.
