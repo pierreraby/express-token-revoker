@@ -73,12 +73,21 @@ const filterInputSchema = Joi.object({
   backup: Joi.boolean()
     .strict()
     .description('Enable backup filter'),
+  backupDir: Joi.string()
+    .when('backup', { not: Joi.exist(), then: Joi.forbidden() })
+    .when('backup', { is: false, then: Joi.forbidden() })
+    .description('Directory to store the backup filter'),
   backupRatioTime: Joi.number()
     .positive()
     .integer()
     .when('backup', { not: Joi.exist(), then: Joi.forbidden() })
     .when('backup', { is: false, then: Joi.forbidden() })
     .description('Ratio of the rotation time for backups'),
+  bufferEnabled: Joi.boolean()
+    .strict()
+    .when('backup', { not: Joi.exist(), then: Joi.forbidden() })
+    .when('backup', { is: false, then: Joi.forbidden() })
+    .description('Enable buffer for items added tothe filter'),
 });  
 
 

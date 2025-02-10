@@ -26,6 +26,7 @@ import { BloomFilterBackupManager } from './BloomFilterBackupManager.js';
  * @property {boolean} [backup] - whether to enable backup.
  * @property {number} [backupRatioTime] - Ratio of the rotation time for backups (e.g., 4 for backup every rotateTime / 4).  Defaults to no backups.
  * @property {string} [backupDir] - The absolute path to the backup directory.  Defaults to a 'backup' directory relative to the current file.
+ * @property {boolean} [bufferEnabled] - Whether to enable the buffer for backup writes.  Defaults to false
  * @property {GenericLogger} logger - Any logger implementing the basic logging methods
  */
 
@@ -223,8 +224,10 @@ export class BloomFilterManager {
       this.previous = this.current;
       this.current = BloomFilterFactory.create(this.numItems, this.fpRate);
       // reinitialize the backup interval with the new filter if needed
-      this.backupManager?.stopBackupInterval();
-      this.backupManager?.startBackupInterval(this.current);
+      if(this.backupManager?.backupRatioTime) {
+        this.backupManager.stopBackupInterval();
+        this.backupManager.startBackupInterval(this.current);
+      }
 
     } catch (error) {
       throw new InternalError(`Failed to rotate filters: ${error.message}`);
