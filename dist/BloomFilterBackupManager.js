@@ -57,9 +57,9 @@ export class BloomFilterBackupManager {
 
   /**
   * @private
-  * @type {boolean}
+  * @type {FilterParams}
   */
-  hasRotated
+  filterParams;
 
   /**
   * @private
@@ -95,20 +95,25 @@ export class BloomFilterBackupManager {
    mutex
 
  /**
+  * @typedef {Object} FilterParams
+  * @property {number} numItems - Number of items to store in the filter
+  * @property {number} fpRate - False positive rate
+  * @property {number} k - Number of hash functions
+  */  
+ /**
   * Creates a new BloomFilterBackupManager instance
   * @param {BloomFilterOptions} options - The options to configure the backup manager.
-  * @param {number} k - Number of hash functions
+  * @param {FilterParams} filterParams - The parameters to configure the Bloom filter.
   * @param {GenericLogger} logger - The logger instance.
   */
-  constructor(options, k, logger) {
+  constructor(options, filterParams, logger) {
       this.id = options.id;
       this.backupEnabled = options.backup ?? false;
       this.backupRatioTime = options.backupRatioTime ?? 0;
       this.rotateTime = options.rotateTime;
       this.backupInterval = null;
       this.logger = logger;
-      this.k = k;
-      this.hasRotated = false; // Sera géré par le BloomFilterManager
+      this.filterParams = filterParams
 
       this.backupDir = options.backupDir || path.resolve(__dirname, '../backup'); //Utiliser resolve
       this.backupCurrentPath = path.join(this.backupDir, `current-${this.id}.blob`);
@@ -363,6 +368,7 @@ export class BloomFilterBackupManager {
       "previous": this.backupPreviousPath
     };
 
+    /** @type {{ current: BloomFilter | null, previous: BloomFilter | null }} */
     let restoredFilters = { current: null, previous: null };
 
     for (const name of filtersToRestore) {
@@ -371,11 +377,8 @@ export class BloomFilterBackupManager {
     }
 
     if (this.#tempFileExistsAndNotEmpty()) {
-      if (restoredFilters.current) {
-          this.#restoreTemp(restoredFilters.current);
-      } else {
-          this.logger.warn("Trying to restore temp into current filter, but no current filter found.")
-      }
+      restoredFilters.current ??= BloomFilterFactory.create(this.filterParams.numItems, this.filterParams.fpRate);
+      this.#restoreTemp(restoredFilters.current);
     }
     return restoredFilters;
   }

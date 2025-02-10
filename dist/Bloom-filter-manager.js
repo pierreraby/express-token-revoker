@@ -114,7 +114,15 @@ export class BloomFilterManager {
     );
 
     this.current = BloomFilterFactory.create(this.numItems, this.fpRate);
-    this.backupManager = new BloomFilterBackupManager(options, this.current.k, this.logger);
+    this.backupManager = new BloomFilterBackupManager(
+      options,
+      {
+        numItems: this.numItems,
+        fpRate: this.fpRate,
+        k: this.current.k
+      },
+      this.logger
+    );
 
     this.#startRotationInterval();
 
@@ -137,8 +145,8 @@ export class BloomFilterManager {
     if (this.backupManager.backupExists()) {
       const restoredFilters = this.backupManager.restore('all');
       if (restoredFilters) {
-        this.current = restoredFilters.current;
-        this.previous = restoredFilters.previous;
+        this.current = restoredFilters.current ?? this.current;
+        this.previous = restoredFilters.previous ?? this.previous;
       }
     }
   }
