@@ -75,6 +75,12 @@ export class BloomFilterManager {
 
   /**
    * @private
+   * @type {BloomFilterBackupManager | null}
+   */
+  backupManager = null;
+
+  /**
+   * @private
    * @type {boolean}
    * */
   hasRotated
@@ -99,7 +105,7 @@ export class BloomFilterManager {
       throw new ValidationError(`Invalid input: ${error.message}`);
     }
 
-    const { numItems, fpRate, rotateTime, id, logger } = options;
+    const { numItems, fpRate, rotateTime, id, logger, backup } = options;
 
     this.id = id;
     this.numItems = numItems;
@@ -114,24 +120,22 @@ export class BloomFilterManager {
     );
 
     this.current = BloomFilterFactory.create(this.numItems, this.fpRate);
-    this.backupManager = new BloomFilterBackupManager(
-      options,
-      {
-        numItems: this.numItems,
-        fpRate: this.fpRate,
-        k: this.current.k
-      },
-      this.logger
-    );
 
-    this.#startRotationInterval();
+    if (backup) {
+      this.backupManager = new BloomFilterBackupManager(
+        options,
+        { numItems: this.numItems, fpRate: this.fpRate, k: this.current.k },
+        this.logger
+      );
 
-    if (this.backupManager.backupEnabled) { 
       this.#restoreBackup();
       if (this.backupManager.backupRatioTime) {
         this.backupManager.startBackupInterval(this.current);
       }
     }
+
+    this.#startRotationInterval();
+    
   }
 
   // Note: not testing private methods
@@ -142,7 +146,7 @@ export class BloomFilterManager {
   * @returns {void} 
   */
   #restoreBackup() {
-    if (this.backupManager.backupExists()) {
+    if (this.backupManager?.backupExists()) {
       const restoredFilters = this.backupManager.restore('all');
       if (restoredFilters) {
         this.current = restoredFilters.current ?? this.current;
@@ -213,14 +217,15 @@ export class BloomFilterManager {
         this.hasRotated = true;
       }
       this.logger.debug('Rotating Bloom filters...');
-      if (this.backupManager.backupEnabled && this.current) {
+      if (this.backupManager && this.current) {
         await this.backupManager.backupRotate(this.current);
       }
       this.previous = this.current;
       this.current = BloomFilterFactory.create(this.numItems, this.fpRate);
-      // reinitialize the backup interval with the new filter
-      this.backupManager.stopBackupInterval();
-      this.backupManager.startBackupInterval(this.current);
+      // reinitialize the backup interval with the new filter if needed
+      this.backupManager?.stopBackupInterval();
+      this.backupManager?.startBackupInterval(this.current);
+
     } catch (error) {
       throw new InternalError(`Failed to rotate filters: ${error.message}`);
     } finally {
@@ -256,9 +261,7 @@ export class BloomFilterManager {
       throw new ValidationError('Value must be a non-empty string');
     }
     try {
-      if (this.backupManager.backupEnabled) {
-        this.backupManager.backupItem(filterItem);
-      }
+      this.backupManager?.backupItem(filterItem);
       this.current?.add(filterItem);
     } catch (error) {
       throw new InternalError(`Failed to add value to Bloom filter: ${error.message}`);
@@ -329,7 +332,7 @@ export class BloomFilterManager {
    * @typedef {Object} Metrics
    * @property {EstimatedMetrics} estimatedMetrics - Estimated metrics of the current and previous filters
    * @property {Configuration} configuration - Configuration of the Bloom filter manager
-   * 
+   */
   /**
    * Get metrics of the current and previous Bloom filter.
    * @returns {Metrics} - Metrics of the current and previous filters.
@@ -340,8 +343,8 @@ export class BloomFilterManager {
       numItems: this.numItems,
       fpRate: this.fpRate,
       rotateTime: this.rotateTime,
-      backupEnabled: this.backupManager.backupEnabled,
-      backupRatioTime: this.backupManager.backupRatioTime
+      backupEnabled: !!this.backupManager,
+      backupRatioTime: this.backupManager?.backupRatioTime ?? 0
     };
     return { estimatedMetrics, configuration };
   }
@@ -359,7 +362,7 @@ export class BloomFilterManager {
       this.current = BloomFilterFactory.create(this.numItems, this.fpRate);
       this.#startRotationInterval();
       this.logger.debug('Bloom filters reset');
-      if (this.backupManager.backupEnabled) {
+      if (this.backupManager) {
         this.backupManager.stopBackupInterval();
         this.#restoreBackup();
         if (this.backupManager.backupRatioTime) {
@@ -380,9 +383,9 @@ export class BloomFilterManager {
    */
   async resetAndClearData() {
     try {
-        this.backupManager.deleteBackupFile(this.backupManager.backupCurrentPath, 'Current');
-        this.backupManager.deleteBackupFile(this.backupManager.backupPreviousPath, 'Previous');
-        this.backupManager.deleteBackupFile(this.backupManager.backupTempFilePath, 'Temporary');
+        this.backupManager?.deleteBackupFile(this.backupManager.backupCurrentPath, 'Current');
+        this.backupManager?.deleteBackupFile(this.backupManager.backupPreviousPath, 'Previous');
+        this.backupManager?.deleteBackupFile(this.backupManager.backupTempFilePath, 'Temporary');
         this.hasRotated = false;
         await this.resetAndRestore(); // Reuse resetAndRestore
     } catch (error) {
@@ -396,7 +399,9 @@ export class BloomFilterManager {
    */
   destroy() {
     this.#stopRotationInterval();
-    this.backupManager.stopBackupInterval();
+    this.backupManager?.stopBackupInterval();
+    this.backupManager?.stoptWriteInterval();
+    this.backupManager = null;
     this.previous = null;
     this.current = null;
     this.logger.debug('BloomFilterManager destroyed.');
