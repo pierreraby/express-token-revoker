@@ -23,93 +23,110 @@ const adminToken = jwt.sign({
 
 // console.log(adminToken);
 
-let tokens = [];
-
-for (let i = 0; i < 1000; i++) {
-  tokens.push(jwt.sign({
-    sub: `4466554400${i}`,
-    fam: `a716-4466554400${i}`,
-    jti: `4466554400${i}`,
-    name: `John Doe ${i}`,
-  }, process.env.JWT_SECRET_KEY, { expiresIn: '1h' }));
+const generateJWT = (min=0, max=1000) => {
+  const tokens = [];
+  for (let i = min; i < max; i++) {
+    tokens.push(jwt.sign({
+      sub: `4466554400${i}`,
+      fam: `a716-4466554400${i}`,
+      jti: `4466554400${i}`,
+      name: `John Doe ${i}`,
+    }, process.env.JWT_SECRET_KEY, { expiresIn: '1h' }));
+  }
+  console.log(`Generated ${tokens.length} tokens`);
+  return tokens;
 }
-console.log(`Generated ${tokens.length} tokens`);
 
+const verifyJWT = async (tokens) =>{
+  let valid = 0;
+  let invalid = 0;
+  for (const token of tokens) {
+    const verify = await fetch('http://localhost:3000/protected', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    const data = await verify.json();
+    if (data.error) {
+      if (data.error === 'invalid_token') {
+        invalid++;
+      }
+    } else {
+      valid++;
+    }
+  }
 
-let cpt = 0;
+  console.log(`Verified ${valid} valid tokens and ${invalid} invalid tokens`);
+}
 
-// verify tokens is not blacklisted
-for (let i = 0; i < tokens.length; i++) {
-  const verify = await fetch('http://localhost:3000/protected', {
+const revokeJWT = async (tokens, claim) => {
+  let cpt = 0;
+  for (const token of tokens) {
+    // extract jti from token
+    const payload64 = token.split('.')[1];
+    const payloadDecoded = Buffer.from(payload64, 'base64').toString('utf-8');
+    const payload = JSON.parse(payloadDecoded);
+
+    const revoke = await fetch(`http://localhost:3000/revoke/jti/${payload[claim]}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${adminToken}`,
+      },
+    });
+    if (revoke.status === 200) {
+      cpt++;
+    }
+  }
+  console.log(`Revoked ${cpt} tokens`);
+}
+
+const getMetrics = async () => {
+  const metricsResponse = await fetch('http://localhost:3000/metrics', {
     method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${tokens[i]}`,
-    },
-  });
-  if (verify.status === 200) {
-    cpt++;
-  } 
-}
-console.log(`Verified ${cpt} tokens in the whitelist`);
-
-cpt = 0;
-
-// revoke tokens
-
-for (let i = 0; i < tokens.length/2; i++) {
-  const revoke = await fetch(`http://localhost:3000/revoke/jti/4466554400${i}`, {
-    method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${adminToken}`,
     },
   });
-  if (revoke.status === 200) {
-    cpt++;
-  }
-  if (i === 10) {
-    console.log(revoke.status);
-    console.log(revoke.statusText);
-    const data = await revoke.json();
-    console.log(data);
-  }
+  const metrics = await metricsResponse.json();
+  return metrics;
 }
-console.log(`Revoked ${cpt} tokens`);
 
-let valid = 0;
-let invalid = 0;
-
-// verify tokens is blacklisted
-for (let i = 0; i < tokens.length; i++) {
-  const verify = await fetch('http://localhost:3000/protected', {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${tokens[i]}`,
-    },
-  });
-  const data = await verify.json();
-  if (data.error) {
-    if (data.error === 'invalid_token') {
-      invalid++;
-    }
-  } else {
-    valid++;
-  }
+const displayMetrics = async () => {
+  const metrics = await getMetrics();
+  const { currentCount, previousCount } = metrics.estimatedMetrics;
+  console.log(`Current count: ${currentCount}, Previous count: ${previousCount}`);
 }
-console.log(`Verified ${valid} valid tokens and ${invalid} invalid tokens`);
 
-const metricsResponse = await fetch('http://localhost:3000/metrics', {
-  method: 'GET',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${adminToken}`,
-  },
-});
-const metrics = await metricsResponse.json();
+const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-console.log(metrics);
+const sequence = async () => {
+  const tokens1 = generateJWT();
+  await verifyJWT(tokens1);
+  await revokeJWT(tokens1, 'jti');
+  await verifyJWT(tokens1);
+  await displayMetrics();
+  await wait(60 * 1000);
+
+  const tokens2 = generateJWT(1000, 2000);
+  await revokeJWT(tokens2, 'jti');
+  const allTokens = tokens1.concat(tokens2);
+  await verifyJWT(allTokens);
+  await displayMetrics();
+  await wait(60 * 1000);
+
+  await verifyJWT(allTokens);
+  await displayMetrics();
+  await wait(60 * 1000);
+
+  await verifyJWT(allTokens);
+  await displayMetrics();
+}
+
+await sequence();
 
 
 

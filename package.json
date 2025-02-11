@@ -11,7 +11,8 @@
     "start": "node --env-file=.env ./examples/standalone/app.js",
     "dev": "nodemon --env-file=.env ./examples/standalone/app.js",
     "client": "node --env-file=.env ./examples/standalone/client.js",
-    "test": "c8 node bin/test.js"
+    "test": "c8 node bin/test.js",
+    "clear": "node -e \"const fs=require('fs'); const path=require('path'); const dir='./backup'; if(fs.existsSync(dir)) fs.readdirSync(dir).forEach(f => fs.rmSync(path.join(dir, f)))\""
   },
   "imports": {
     "#dist/*": "./dist/*",

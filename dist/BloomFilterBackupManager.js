@@ -229,9 +229,8 @@ export class BloomFilterBackupManager {
   */
   startBackupInterval(filter) {
     let remainingbackup = this.backupRatioTime - 1; //number of backup remaining before rotation
-
     this.backupInterval = setInterval(async () => {
-      if (remainingbackup > 0) {
+      if (remainingbackup > 0) { // No backup on the last iteration because it will be backuped with the rotation and reinitialized
         await this.#backupWithRetry(filter);
         remainingbackup--;
       }

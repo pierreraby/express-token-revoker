@@ -7,8 +7,8 @@ const JWTconfig = { // this config uses ~21MB of memory
   // Core configuration
   id: "JWTrevoker",
   logger,
-  grpcEnabled: true,
-  grpcPort: 50051,
+  // grpcEnabled: true,
+  // grpcPort: 50051,
   // Token validation configuration
   claimsToCheck: ["jti", "fam", "sub"], // adding claims to check, return a JWT check middleware
   payloadKey: "token", // key to get token payload from request
@@ -16,7 +16,7 @@ const JWTconfig = { // this config uses ~21MB of memory
     // Bloom Filter configuration
     numItems: 1000000, // 1 million items
     fpRate: 0.000001, // one in a million
-    rotateTime: 10 * 60000, // 10 minutes
+    rotateTime: 1 * 60000, // 10 minutes
     backup: true,
     backupRatioTime: 2 // 5 minutes (rotateTime / backupRatioTime)
   }
