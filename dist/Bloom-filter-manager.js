@@ -46,6 +46,24 @@ export class BloomFilterManager {
 
   /**
    * @private
+   * @type {number}
+   */
+  numItems;
+
+  /**
+   * @private
+   * @type {number}
+   */
+  InitialNumItems;
+
+  /**
+   * @private
+   * @type {number}
+   */
+  fpRate;
+
+  /**
+   * @private
    * @type {BloomFilter | null}
    */
   previous = null;
@@ -110,6 +128,7 @@ export class BloomFilterManager {
 
     this.id = id;
     this.numItems = numItems;
+    this.InitialNumItems = numItems;
     this.fpRate = fpRate;
     this.rotateTime = rotateTime;
     this.logger = logger;
@@ -230,7 +249,8 @@ export class BloomFilterManager {
       }
 
     } catch (error) {
-      throw new InternalError(`Failed to rotate filters: ${error.message}`);
+      const err = /** @type {Error} */ (error);
+      throw new InternalError(`Failed to rotate filters: ${err.message}`);
     } finally {
       release();
     }
@@ -267,7 +287,8 @@ export class BloomFilterManager {
       this.backupManager?.backupItem(filterItem);
       this.current?.add(filterItem);
     } catch (error) {
-      throw new InternalError(`Failed to add value to Bloom filter: ${error.message}`);
+      const err = /** @type {Error} */ (error);
+      throw new InternalError(`Failed to add value to Bloom filter: ${err.message}`);
     }
   }
 
@@ -373,7 +394,8 @@ export class BloomFilterManager {
         }
       }
     } catch (error) {
-      throw new InternalError(`Failed to reset and restore: ${error.message}`);
+      const err = /** @type {Error} */ (error);
+      throw new InternalError(`Failed to reset and restore: ${err.message}`);
     } finally {
       release();
     }
@@ -392,7 +414,8 @@ export class BloomFilterManager {
         this.hasRotated = false;
         await this.resetAndRestore(); // Reuse resetAndRestore
     } catch (error) {
-        throw new InternalError(`Failed to reset and clear data: ${error.message}`);
+        const err = /** @type {Error} */ (error);
+        throw new InternalError(`Failed to reset and clear data: ${err.message}`);
     }
 }
 
