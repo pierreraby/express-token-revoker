@@ -14,7 +14,7 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
   longs: String,
   enums: String,
   defaults: true,
-  oneofs: true
+  oneofs: true,
 });
 
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition);
@@ -30,7 +30,7 @@ export function createRevokerClientAsync(serverAddress: string) {
     resetAndRestore: promisify(client.resetAndRestore).bind(client),
     resetAndClearData: promisify(client.resetAndClearData).bind(client),
     ListRevokers: promisify(client.ListRevokers).bind(client),
-    close: client.close.bind(client)
+    close: client.close.bind(client),
   };
   return promisifiedClient;
 }
@@ -76,7 +76,6 @@ try {
 
   const hasResponse3 = await clientAsync.has({ revokerId, item });
   console.log('Has Response (3):', hasResponse3);
-
 } catch (error) {
   console.error('Error during gRPC call:', error);
 }
@@ -118,7 +117,6 @@ try {
 
   const hasResponse3 = await clientAsync.has({ revokerId, item });
   console.log('Has Response (3):', hasResponse3);
-
 } catch (error) {
   console.error('Error during gRPC call:', error);
 }

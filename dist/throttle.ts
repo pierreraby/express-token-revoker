@@ -20,6 +20,6 @@ export const logOrThrottle = (
       logger[isError ? 'warn' : 'info'](message);
     }
   } catch (error) {
-    logger.error("Error in logOrThrottle:", error);
+    logger.error('Error in logOrThrottle:', error);
   }
 };

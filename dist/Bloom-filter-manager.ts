@@ -86,7 +86,6 @@ export class BloomFilterManager {
    * @throws {InternalError} If an error occurs during initialization.
    */
   constructor(options: BloomFilterOptions) {
-
     // Validate input
     const { error } = filterInputSchema.validate(options);
     if (error) {
@@ -124,7 +123,6 @@ export class BloomFilterManager {
     }
 
     this.#startRotationInterval();
-
   }
 
   // Note: not testing private methods
@@ -179,7 +177,7 @@ export class BloomFilterManager {
       } catch (error) {
         this.logger.error(`Rotation failed (attempt ${i + 1}/${maxRetries}):`, error);
         if (i < maxRetries - 1) {
-          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          await new Promise((resolve) => setTimeout(resolve, retryDelay));
         }
       }
     }
@@ -211,7 +209,6 @@ export class BloomFilterManager {
         this.backupManager.stopBackupInterval();
         this.backupManager.startBackupInterval(this.current);
       }
-
     } catch (error) {
       const err = error as Error;
       throw new InternalError(`Failed to rotate filters: ${err.message}`);
@@ -281,7 +278,7 @@ export class BloomFilterManager {
       currentCount: 0,
       previousCount: 0,
       currentFpRate: 0,
-      previousFpRate: 0
+      previousFpRate: 0,
     };
 
     if (this.current) {
@@ -311,7 +308,7 @@ export class BloomFilterManager {
       fpRate: this.fpRate,
       rotateTime: this.rotateTime,
       backupEnabled: !!this.backupManager,
-      backupRatioTime: this.backupManager?.backupRatioTime ?? 0
+      backupRatioTime: this.backupManager?.backupRatioTime ?? 0,
     };
     return { estimatedMetrics, configuration };
   }

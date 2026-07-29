@@ -1,6 +1,6 @@
 import type { RequestHandler, Request, Response, NextFunction } from 'express';
 import type { GenericLogger } from './types.js';
-import type { BloomFilterManager } from "./Bloom-filter-manager.js";
+import type { BloomFilterManager } from './Bloom-filter-manager.js';
 import { ValidationError } from './errors.js';
 import { logOrThrottle } from './throttle.js';
 
@@ -39,7 +39,6 @@ export const createJWTMiddleware = (
   logger: GenericLogger,
   throttleJWT: (message: string) => void
 ): RequestHandler => {
-
   /**
    * Validates the presence of the JWT payload.
    * @param payload - The JWT payload to validate.
@@ -48,7 +47,7 @@ export const createJWTMiddleware = (
    */
   const validatePayload = (payload: JWTPayload | undefined): payload is JWTPayload => {
     if (!payload) {
-      throw new ValidationError("Missing JWT payload in request");
+      throw new ValidationError('Missing JWT payload in request');
     }
     return true;
   };
@@ -77,7 +76,7 @@ export const createJWTMiddleware = (
    * @param claims - The claims to validate.
    */
   const validateAllClaims = (payload: JWTPayload, claims: string[]): boolean => {
-    return claims.every(claim => validateClaim(payload, claim));
+    return claims.every((claim) => validateClaim(payload, claim));
   };
 
   /**
@@ -91,22 +90,22 @@ export const createJWTMiddleware = (
         next();
       } else {
         res.status(401).json({
-          error: "invalid_token",
-          message: "Invalid token!",
+          error: 'invalid_token',
+          message: 'Invalid token!',
         });
       }
     } catch (error) {
       if (error instanceof ValidationError) {
         logger.warn(`Validation error: ${error.message}`);
         res.status(400).json({
-          error: "validation_error",
+          error: 'validation_error',
           message: error.message,
         });
       } else {
         logger.error(`Unexpected error during JWT validation: ${error.message}`);
         res.status(500).json({
-          error: "internal_error",
-          message: "An unexpected error occurred",
+          error: 'internal_error',
+          message: 'An unexpected error occurred',
         });
       }
     }
@@ -127,7 +126,6 @@ export const createOpaqueMiddleware = (
   logger: GenericLogger,
   throttleOpaque: (message: string) => void
 ): RequestHandler => {
-
   /**
    * Extracts the token from the request headers.
    * @param req - Express request object.
@@ -142,12 +140,12 @@ export const createOpaqueMiddleware = (
       throw new ValidationError(`Missing header: ${normalizedHeader}`);
     }
 
-    if (normalizedHeader === "authorization") {
+    if (normalizedHeader === 'authorization') {
       // Ensure headerValue is a string
       const authHeader = Array.isArray(headerValue) ? headerValue[0] : headerValue;
-      const [type, token] = authHeader.split(" ");
+      const [type, token] = authHeader.split(' ');
 
-      if (!token || type.toLowerCase() !== "bearer") {
+      if (!token || type.toLowerCase() !== 'bearer') {
         throw new ValidationError('Invalid authorization header format. Expected "Bearer <token>"');
       }
       return token;
@@ -182,7 +180,7 @@ export const createOpaqueMiddleware = (
         next();
       } else {
         res.status(401).json({
-          error: "invalid_token",
+          error: 'invalid_token',
           message: `Invalid token!`,
         });
       }
@@ -190,14 +188,14 @@ export const createOpaqueMiddleware = (
       if (error instanceof ValidationError) {
         logger.warn(`Validation error: ${error.message}`);
         res.status(400).json({
-          error: "validation_error",
-          message: error.message
+          error: 'validation_error',
+          message: error.message,
         });
       } else {
         logger.error(`Unexpected error during opaque token validation: ${error.message}`);
         res.status(500).json({
-          error: "internal_error",
-          message: "An unexpected error occurred",
+          error: 'internal_error',
+          message: 'An unexpected error occurred',
         });
       }
     }
