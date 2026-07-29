@@ -314,7 +314,12 @@ describe('BloomFilterManager Add and Has', () => {
   it('has returns true for a value added to the previous filter after rotation', async () => {
     const value = 'testValue';
     manager.add(value);
-    await new Promise((resolve) => setTimeout(resolve, 600)); // Attendre la rotation
+    // Wait for an actual rotation (rotateTime = 2000ms) so `value` moves to the
+    // previous filter; `previous` is populated only once the rotation completes.
+    await vi.waitFor(() => expect(manager.previous).not.toBeNull(), {
+      timeout: 3500,
+      interval: 20,
+    });
     expect(manager.has(value)).toBe(true);
   });
 
@@ -372,8 +377,6 @@ describe('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', ()
     vi.clearAllMocks();
     manager.add('testValue');
     await manager.resetAndRestore();
-    console.log(logger.debug.mock.calls);
-    console.log(manager.id);
     expect(logger.debug).toHaveBeenCalledWith('Bloom filters reset');
     expect(logger.debug).toHaveBeenCalledWith(
       `Elements restored from temp file for instance : ${manager.id}`
@@ -388,10 +391,16 @@ describe('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', ()
     vi.clearAllMocks();
     manager.add('testValue');
 
-    await new Promise((resolve) => setTimeout(resolve, 600)); // await backup
-
-    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('Saved current filter to:'));
-    expect(logger.debug).toHaveBeenCalledWith(`Temp file cleared for instance ${manager.id}`);
+    // Wait for the scheduled backup to actually complete (interval = rotateTime / backupRatioTime).
+    await vi.waitFor(
+      () => {
+        expect(logger.debug).toHaveBeenCalledWith(
+          expect.stringContaining('Saved current filter to:')
+        );
+        expect(logger.debug).toHaveBeenCalledWith(`Temp file cleared for instance ${manager.id}`);
+      },
+      { timeout: 2000, interval: 20 }
+    );
     manager.add('testValue2');
 
     await manager.resetAndRestore();
@@ -408,11 +417,23 @@ describe('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', ()
 
   it('resetAndRestore reset filters and restore backup files after backup and rotation', async () => {
     manager.add('testValue');
-    await new Promise((resolve) => setTimeout(resolve, 600)); // await backup
-    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('Saved current filter to:'));
-    expect(logger.debug).toHaveBeenCalledWith(`Temp file cleared for instance ${manager.id}`);
+    await vi.waitFor(
+      () => {
+        expect(logger.debug).toHaveBeenCalledWith(
+          expect.stringContaining('Saved current filter to:')
+        );
+        expect(logger.debug).toHaveBeenCalledWith(`Temp file cleared for instance ${manager.id}`);
+      },
+      { timeout: 2000, interval: 20 }
+    );
     manager.add('testValue2');
-    await new Promise((resolve) => setTimeout(resolve, 600)); // await rotation
+    // Wait for the rotation to FULLY complete: `previous` is only assigned after
+    // the rotation-time backup has flushed the blob and cleared the WAL, so adding
+    // testValue3 afterwards cannot be wiped by an in-flight backup.
+    await vi.waitFor(() => expect(manager.previous).not.toBeNull(), {
+      timeout: 2000,
+      interval: 20,
+    });
     expect(logger.debug).toHaveBeenCalledWith('Rotating Bloom filters...');
     manager.add('testValue3');
     await manager.resetAndRestore();
@@ -430,11 +451,21 @@ describe('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', ()
 
   it('resetAndClearData resets filters and deletes backup files', async () => {
     manager.add('testValue');
-    await new Promise((resolve) => setTimeout(resolve, 600)); // await backup
-    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('Saved current filter to:'));
-    expect(logger.debug).toHaveBeenCalledWith(`Temp file cleared for instance ${manager.id}`);
+    await vi.waitFor(
+      () => {
+        expect(logger.debug).toHaveBeenCalledWith(
+          expect.stringContaining('Saved current filter to:')
+        );
+        expect(logger.debug).toHaveBeenCalledWith(`Temp file cleared for instance ${manager.id}`);
+      },
+      { timeout: 2000, interval: 20 }
+    );
     manager.add('testValue2');
-    await new Promise((resolve) => setTimeout(resolve, 600)); // await rotation
+    // Same rationale as above: wait for the rotation-time backup to finish.
+    await vi.waitFor(() => expect(manager.previous).not.toBeNull(), {
+      timeout: 2000,
+      interval: 20,
+    });
     expect(logger.debug).toHaveBeenCalledWith('Rotating Bloom filters...');
     manager.add('testValue3');
     await manager.resetAndClearData();
@@ -484,31 +515,41 @@ describe('BloomFilterManager Rotation', () => {
 
   it('rotate switches current to previous and creates a new current', async () => {
     const initialCurrent = manager.current;
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    expect(manager.previous).toBe(initialCurrent);
-    expect(manager.current).not.toBe(initialCurrent);
+    await vi.waitFor(
+      () => {
+        expect(manager.previous).toBe(initialCurrent);
+        expect(manager.current).not.toBe(initialCurrent);
+      },
+      { timeout: 2000, interval: 20 }
+    );
   });
 
   it('rotate set hasRotated to true', async () => {
     await manager.resetAndClearData();
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    expect(manager.hasRotated).toBe(true);
+    await vi.waitFor(() => expect(manager.hasRotated).toBe(true), { timeout: 2000, interval: 20 });
     manager.hasRotated = false;
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    expect(manager.hasRotated).toBe(true);
+    await vi.waitFor(() => expect(manager.hasRotated).toBe(true), { timeout: 2000, interval: 20 });
   });
 
   it('rotate is called after rotateTime', async () => {
     const initialCurrent = manager.current;
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    expect(manager.previous).toBe(initialCurrent);
-    expect(manager.current).not.toBe(initialCurrent);
+    await vi.waitFor(
+      () => {
+        expect(manager.previous).toBe(initialCurrent);
+        expect(manager.current).not.toBe(initialCurrent);
+      },
+      { timeout: 2000, interval: 20 }
+    );
   });
 
   it('filters rotate correctly after rotateTime', async () => {
     manager.add('value1');
     expect(manager.has('value1')).toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    const currentBefore = manager.current;
+    await vi.waitFor(() => expect(manager.current).not.toBe(currentBefore), {
+      timeout: 2000,
+      interval: 20,
+    });
     manager.add('value2');
     expect(manager.has('value1')).toBe(true);
     expect(manager.has('value2')).toBe(true);
@@ -567,7 +608,12 @@ describe('BloomFilterManager metrics', () => {
     for (let i = 0; i < NUMITEMS; i++) {
       manager.add(i.toString());
     }
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    // Wait for the rotation to fully complete (`previous` is populated only after
+    // the rotation-time backup finishes) before filling the new current filter.
+    await vi.waitFor(() => expect(manager.previous).not.toBeNull(), {
+      timeout: 2000,
+      interval: 20,
+    });
     for (let i = 0; i < NUMITEMS; i++) {
       manager.add(i.toString());
     }
@@ -612,8 +658,14 @@ describe('BloomFilterBackupManager restore and edge cases', () => {
 
   it('restore with "current" only restores the current filter', async () => {
     manager.add('hello');
-    // Trigger a backup by waiting for the backup interval
-    await new Promise((resolve) => setTimeout(resolve, 1100));
+    // Wait for the scheduled backup to actually complete (interval = rotateTime / backupRatioTime).
+    await vi.waitFor(
+      () =>
+        expect(logger.debug).toHaveBeenCalledWith(
+          expect.stringContaining('Saved current filter to:')
+        ),
+      { timeout: 3000, interval: 20 }
+    );
     // Now restore only the current filter
     const restored = manager.backupManager!.restore('current');
     expect(restored.current).not.toBeNull();
@@ -834,16 +886,17 @@ describe('BloomFilterBackupManager restore and edge cases', () => {
       .mockRejectedValue(new Error('Disk full'));
 
     const currentBefore = mgr.current;
-    // Wait for ONE rotation to fire (rotateTime=400, wait=250)
-    await new Promise((resolve) => setTimeout(resolve, 250));
-
-    // Rotation should have completed despite backup failure
-    expect(mgr.hasRotated).toBe(true);
-    expect(mgr.current).not.toBe(currentBefore);
-    expect(mgr.previous).not.toBeNull();
-    // Backup failure should be logged
-    expect(logger.error).toHaveBeenCalledWith(
-      expect.stringContaining('continuing with memory-only rotation')
+    // Wait for ONE rotation to fire (rotateTime=100) even though backupRotate rejects.
+    await vi.waitFor(
+      () => {
+        expect(mgr.hasRotated).toBe(true);
+        expect(mgr.current).not.toBe(currentBefore);
+        expect(mgr.previous).not.toBeNull();
+        expect(logger.error).toHaveBeenCalledWith(
+          expect.stringContaining('continuing with memory-only rotation')
+        );
+      },
+      { timeout: 2000, interval: 20 }
     );
 
     backupRotateSpy.mockRestore();
