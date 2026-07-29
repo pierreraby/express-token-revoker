@@ -16,7 +16,7 @@
     "build": "tsc && mkdir -p build/grpc/protos && cp -r dist/grpc/protos/. build/grpc/protos/",
     "clear": "node -e \"const fs=require('fs'); const path=require('path'); const dir='./backup'; if(fs.existsSync(dir)) fs.readdirSync(dir).forEach(f => fs.rmSync(path.join(dir, f)))\"",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "c8 vitest run"
   },
   "imports": {
     "#dist/*": "./build/*",
@@ -39,6 +39,7 @@
     "@types/supertest": "^7.2.1",
     "@types/throttleit": "^1.0.2",
     "@vitest/coverage-v8": "^4.1.10",
+    "c8": "^12.0.0",
     "nodemon": "^3.1.9",
     "supertest": "^7.2.2",
     "typescript": "^7.0.2",

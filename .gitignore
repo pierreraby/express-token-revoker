@@ -4,3 +4,4 @@ backup/
 coverage/
 build/
 dist/mytest.js.pi-subagents/
+.pi-subagents/
