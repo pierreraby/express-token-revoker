@@ -1,122 +1,91 @@
-// @ts-check
-
-// BloomFilterManager.js
+// BloomFilterManager.ts
 import { InternalError, ValidationError } from './errors.js';
-import { BloomFilter } from './bloomfilter.js';
+import type { BloomFilter } from './bloomfilter.js';
 import { Mutex } from 'async-mutex';
 import { filterInputSchema } from './Inputs-validation.js';
 import { BloomFilterFactory } from './BloomFilterFactory.js';
 import { BloomFilterBackupManager } from './BloomFilterBackupManager.js';
+import type { GenericLogger } from './types.js';
 
-// Redefinition of the GenericLogger type to keep the BloomFilterManager class independent
 /**
- * @typedef {Object} GenericLogger
- * @property {function(...any): void} error - Log an error message
- * @property {function(...any): void} warn - Log a warning message
- * @property {function(...any): void} info - Log an info message
- * @property {function(...any): void} debug - Log a debug message
+ * Configuration options for the Bloom filter manager.
  */
+export interface BloomFilterOptions {
+  /** Number of items to store in the filter. */
+  numItems: number;
+  /** Target false positive rate. */
+  fpRate: number;
+  /** Filter rotation interval in milliseconds. */
+  rotateTime: number;
+  /** The id of the bloom filter (same as the revoker id). */
+  id: string;
+  /** whether to enable backup. */
+  backup?: boolean;
+  /** Ratio of the rotation time for backups (e.g., 4 for backup every rotateTime / 4). Defaults to no backups. */
+  backupRatioTime?: number;
+  /** The absolute path to the backup directory. Defaults to a 'backup' directory relative to the current file. */
+  backupDir?: string;
+  /** Whether to enable the buffer for backup writes. Defaults to false */
+  bufferEnabled?: boolean;
+  /** Any logger implementing the basic logging methods */
+  logger: GenericLogger;
+}
+
+export interface EstimatedMetrics {
+  /** Estimated number of items in current filter (0 if no filter) */
+  currentCount: number;
+  /** Estimated number of items in previous filter (0 if no filter) */
+  previousCount: number;
+  /** Estimated false positive rate of current filter (0 if no filter) */
+  currentFpRate: number;
+  /** Estimated false positive rate of previous filter (0 if no filter) */
+  previousFpRate: number;
+}
+
+export interface Configuration {
+  /** Number of items to store in the filter */
+  numItems: number;
+  /** Target false positive rate */
+  fpRate: number;
+  /** Filter rotation interval in milliseconds */
+  rotateTime: number;
+  /** Whether backup is enabled */
+  backupEnabled: boolean;
+  /** Ratio of the rotation time for backups */
+  backupRatioTime: number;
+}
+
+export interface Metrics {
+  /** Estimated metrics of the current and previous filters */
+  estimatedMetrics: EstimatedMetrics;
+  /** Configuration of the Bloom filter manager */
+  configuration: Configuration;
+}
 
 /**
- * @typedef {Object} BloomFilterOptions
- * @property {number} numItems - Number of items to store in the filter.
- * @property {number} fpRate - Target false positive rate.
- * @property {number} rotateTime - Filter rotation interval in milliseconds.
- * @property {string} id - The id of the bloom filter (same as the revoker id).
- * @property {boolean} [backup] - whether to enable backup.
- * @property {number} [backupRatioTime] - Ratio of the rotation time for backups (e.g., 4 for backup every rotateTime / 4).  Defaults to no backups.
- * @property {string} [backupDir] - The absolute path to the backup directory.  Defaults to a 'backup' directory relative to the current file.
- * @property {boolean} [bufferEnabled] - Whether to enable the buffer for backup writes.  Defaults to false
- * @property {GenericLogger} logger - Any logger implementing the basic logging methods
- */
-
-/**
- * @class BloomFilterManager
- * @classdesc Manages the bloom filters and their rotation.
- * @public
- * @export BloomFilterManager
+ * Manages the bloom filters and their rotation.
  */
 export class BloomFilterManager {
-
-   /**
-   * @private
-   * @type {string}
-   */
-   id;
-
-  /**
-   * @private
-   * @type {number}
-   */
-  numItems;
-
-  /**
-   * @private
-   * @type {number}
-   */
-  InitialNumItems;
-
-  /**
-   * @private
-   * @type {number}
-   */
-  fpRate;
-
-  /**
-   * @private
-   * @type {BloomFilter | null}
-   */
-  previous = null;
-
-  /**
-   * @private
-   * @type {BloomFilter | null}
-   */
-  current = null;
-
-  /**
-   * @private
-   * @type {NodeJS.Timeout | null}
-   */
-  rotationInterval = null;
-
-  /**
-   * @private
-   * @type {number}
-   */
-  rotateTime;
-
-  /**
-   * @private
-   * @type {GenericLogger}
-   */
-  logger;
-
-  /**
-   * @private
-   * @type {BloomFilterBackupManager | null}
-   */
-  backupManager = null;
-
-  /**
-   * @private
-   * @type {boolean}
-   * */
-  hasRotated
-
- /**
-  * @private
-  * @type {Mutex}
-  */
-  mutex
+  id: string;
+  numItems: number;
+  InitialNumItems: number;
+  fpRate: number;
+  previous: BloomFilter | null = null;
+  current: BloomFilter | null = null;
+  rotationInterval: NodeJS.Timeout | null = null;
+  rotateTime: number;
+  logger: GenericLogger;
+  backupManager: BloomFilterBackupManager | null = null;
+  hasRotated: boolean;
+  mutex: Mutex;
 
   /**
    * Creates an instance of BloomFilterManager.
-   * @param {BloomFilterOptions} options - Bloom filter configuration.
+   * @param options - Bloom filter configuration.
    * @throws {ValidationError} If the input is invalid.
    * @throws {InternalError} If an error occurs during initialization.
    */
-  constructor(options) {
+  constructor(options: BloomFilterOptions) {
 
     // Validate input
     const { error } = filterInputSchema.validate(options);
@@ -155,17 +124,16 @@ export class BloomFilterManager {
     }
 
     this.#startRotationInterval();
-    
+
   }
 
   // Note: not testing private methods
   /* c8 ignore start */
 
- /**
-  * Initializes the backup manager and restores the filters from the backup if it exists.
-  * @returns {void} 
-  */
-  #restoreBackup() {
+  /**
+   * Initializes the backup manager and restores the filters from the backup if it exists.
+   */
+  #restoreBackup(): void {
     if (this.backupManager?.backupExists()) {
       const restoredFilters = this.backupManager.restore('all');
       if (restoredFilters) {
@@ -175,38 +143,35 @@ export class BloomFilterManager {
     }
   }
 
- /**
-  * Initializes the timer intervals for filter rotation
-  * @returns {void}
-  */
-  #startRotationInterval() {
-  this.rotationInterval = setInterval(async () => {
+  /**
+   * Initializes the timer intervals for filter rotation
+   */
+  #startRotationInterval(): void {
+    this.rotationInterval = setInterval(async () => {
       await this.#rotateWithRetry(); // Utiliser une méthode de rotation avec retry
     }, this.rotateTime);
   }
 
- /**
+  /**
    * Stops the Bloom filter rotation interval.
-   * @returns {void}
    */
- #stopRotationInterval() {
-  if (this.rotationInterval !== null) {
-    clearInterval(this.rotationInterval);
-    this.rotationInterval = null;
-    this.logger.debug(`Rotation stopped for id: ${this.id}`);
+  #stopRotationInterval(): void {
+    if (this.rotationInterval !== null) {
+      clearInterval(this.rotationInterval);
+      this.rotationInterval = null;
+      this.logger.debug(`Rotation stopped for id: ${this.id}`);
+    }
   }
-}
 
   /**
    * Rotates the Bloom filter with retries.
-   * @returns {Promise<void>}
    * @throws {InternalError} If an error occurs while rotating the filter.
    * @throws {InternalError} If the maximum number of retries is reached.
    */
-  async #rotateWithRetry() {
+  async #rotateWithRetry(): Promise<void> {
     const maxRetries = 3;
     const retryDelay = 5000; // 5 secondes
-  
+
     for (let i = 0; i < maxRetries; i++) {
       try {
         await this.#rotate();
@@ -219,18 +184,17 @@ export class BloomFilterManager {
       }
     }
     this.logger.error('Max retries reached. Stopping rotation.');
-      if (this.rotationInterval) {
-        clearInterval(this.rotationInterval);
-        this.rotationInterval = null;
-      }
+    if (this.rotationInterval) {
+      clearInterval(this.rotationInterval);
+      this.rotationInterval = null;
+    }
   }
 
   /**
    * Rotates the Bloom filters.
-   * @returns {Promise<void>}
    * @throws {InternalError} If an error occurs while rotating the filters.
    */
-  async #rotate() {
+  async #rotate(): Promise<void> {
     const release = await this.mutex.acquire();
     try {
       if (!this.hasRotated) {
@@ -243,13 +207,13 @@ export class BloomFilterManager {
       this.previous = this.current;
       this.current = BloomFilterFactory.create(this.numItems, this.fpRate);
       // reinitialize the backup interval with the new filter if needed
-      if(this.backupManager?.backupRatioTime) {
+      if (this.backupManager?.backupRatioTime) {
         this.backupManager.stopBackupInterval();
         this.backupManager.startBackupInterval(this.current);
       }
 
     } catch (error) {
-      const err = /** @type {Error} */ (error);
+      const err = error as Error;
       throw new InternalError(`Failed to rotate filters: ${err.message}`);
     } finally {
       release();
@@ -260,26 +224,25 @@ export class BloomFilterManager {
 
   /**
    * Adds a value to the current Bloom filter and synchronously appends it to the temporary backup file.
-   * 
+   *
    * IMPORTANT: This method uses synchronous file writing (fs.appendFileSync) to ensure that no tokens are lost in case of a crash.
    * This is a deliberate choice made after careful consideration of the following factors:
-   * 
+   *
    * - Low data volume: Only about 50 characters are added per token.
    * - Measured and acceptable synchronous write time: Tests have shown an average write time of 9 µs on my old sata ssd, which has a negligible impact on performance.
    * - No concurrency (currently): There are no other concurrent operations on the temporary file or the filters.
    * - Priority to data integrity: It is crucial to guarantee that no tokens are lost in the event of a crash.
    * - Append-only writes: Simplifies management and reduces risks.
    * - No queue, batching, or mutex: To avoid data loss in memory and maintain simplicity.
-   * 
+   *
    * This approach is a trade-off between performance and data integrity. It is acceptable in this specific case, but should be reevaluated if the
    * data volume, frequency of additions, or complexity of the application increases significantly.
    *
-   * @param {string} filterItem - The value to add.
-   * @returns {void}
+   * @param filterItem - The value to add.
    * @throws {ValidationError} If filterItem is invalid.
    * @throws {InternalError} If writing to the temp file fails.
    */
-  add(filterItem) {
+  add(filterItem: string): void {
     if (typeof filterItem !== 'string' || filterItem.trim() === '') {
       throw new ValidationError('Value must be a non-empty string');
     }
@@ -287,22 +250,22 @@ export class BloomFilterManager {
       this.backupManager?.backupItem(filterItem);
       this.current?.add(filterItem);
     } catch (error) {
-      const err = /** @type {Error} */ (error);
+      const err = error as Error;
       throw new InternalError(`Failed to add value to Bloom filter: ${err.message}`);
     }
   }
 
   /**
    * Checks for the presence of a value in the current and previous Bloom filters.
-   * @param {string} value - The value to check.
-   * @returns {boolean} - `true` if the value might be present, `false` if it is definitely absent.
+   * @param value - The value to check.
+   * @returns `true` if the value might be present, `false` if it is definitely absent.
    * @throws {ValidationError} If the value is not a string.
    */
-  has(value) {
+  has(value: string): boolean {
     if (typeof value !== 'string' || value.trim() === '') {
       throw new ValidationError('Value must be a non-empty string');
     }
-      
+
     return (
       (this.current ? this.current.test(value) : false) ||
       (this.previous ? this.previous.test(value) : false)
@@ -310,18 +273,11 @@ export class BloomFilterManager {
   }
 
   /**
-   * @typedef {Object} EstimatedMetrics
-   * @property {number} currentCount - Estimated number of items in current filter (0 if no filter)
-   * @property {number} previousCount - Estimated number of items in previous filter (0 if no filter)
-   * @property {number} currentFpRate - Estimated false positive rate of current filter (0 if no filter)
-   * @property {number} previousFpRate - Estimated false positive rate of previous filter (0 if no filter)
-   */ 
-  /**
    * Get the estimated metrics of the current and previous Bloom filter.
-   * @returns {EstimatedMetrics} - Estimated metrics of the current and previous filters.
+   * @returns Estimated metrics of the current and previous filters.
    */
-  #getEstimatedMetrics() {
-    const metrics = {
+  #getEstimatedMetrics(): EstimatedMetrics {
+    const metrics: EstimatedMetrics = {
       currentCount: 0,
       previousCount: 0,
       currentFpRate: 0,
@@ -345,25 +301,12 @@ export class BloomFilterManager {
   }
 
   /**
-   * @typedef {Object} Configuration
-   * @property {number} numItems - Number of items to store in the filter
-   * @property {number} fpRate - Target false positive rate
-   * @property {number} rotateTime - Filter rotation interval in milliseconds
-   * @property {boolean} backupEnabled - Whether backup is enabled
-   * @property {number} backupRatioTime - Ratio of the rotation time for backups
-   */
-  /**
-   * @typedef {Object} Metrics
-   * @property {EstimatedMetrics} estimatedMetrics - Estimated metrics of the current and previous filters
-   * @property {Configuration} configuration - Configuration of the Bloom filter manager
-   */
-  /**
    * Get metrics of the current and previous Bloom filter.
-   * @returns {Metrics} - Metrics of the current and previous filters.
+   * @returns Metrics of the current and previous filters.
    */
-  getMetrics() {
+  getMetrics(): Metrics {
     const estimatedMetrics = this.#getEstimatedMetrics();
-    const configuration = {
+    const configuration: Configuration = {
       numItems: this.numItems,
       fpRate: this.fpRate,
       rotateTime: this.rotateTime,
@@ -375,10 +318,9 @@ export class BloomFilterManager {
 
   /**
    * Resets and restores the Bloom filters.
-   * @returns {Promise<void>}
    * @throws {InternalError} If an error occurs while resetting the filters
    */
-  async resetAndRestore() {
+  async resetAndRestore(): Promise<void> {
     const release = await this.mutex.acquire();
     try {
       this.#stopRotationInterval();
@@ -394,7 +336,7 @@ export class BloomFilterManager {
         }
       }
     } catch (error) {
-      const err = /** @type {Error} */ (error);
+      const err = error as Error;
       throw new InternalError(`Failed to reset and restore: ${err.message}`);
     } finally {
       release();
@@ -403,27 +345,27 @@ export class BloomFilterManager {
 
   /**
    * Resets the Bloom filters and deletes the backup files.
-   * @returns {Promise<void>}
    * @throws {InternalError} If an error occurs while resetting the filters.
    */
-  async resetAndClearData() {
+  async resetAndClearData(): Promise<void> {
     try {
-        this.backupManager?.deleteBackupFile(this.backupManager.backupCurrentPath, 'Current');
-        this.backupManager?.deleteBackupFile(this.backupManager.backupPreviousPath, 'Previous');
-        this.backupManager?.deleteBackupFile(this.backupManager.backupTempFilePath, 'Temporary');
-        this.hasRotated = false;
-        await this.resetAndRestore(); // Reuse resetAndRestore
+      if (this.backupManager) {
+        this.backupManager.deleteBackupFile(this.backupManager.backupCurrentPath, 'Current');
+        this.backupManager.deleteBackupFile(this.backupManager.backupPreviousPath, 'Previous');
+        this.backupManager.deleteBackupFile(this.backupManager.backupTempFilePath, 'Temporary');
+      }
+      this.hasRotated = false;
+      await this.resetAndRestore(); // Reuse resetAndRestore
     } catch (error) {
-        const err = /** @type {Error} */ (error);
-        throw new InternalError(`Failed to reset and clear data: ${err.message}`);
+      const err = error as Error;
+      throw new InternalError(`Failed to reset and clear data: ${err.message}`);
     }
-}
+  }
 
   /**
    * Cleans up resources when the instance is destroyed.
-   * @returns {void}
    */
-  destroy() {
+  destroy(): void {
     this.#stopRotationInterval();
     this.backupManager?.stopBackupInterval();
     this.backupManager?.stoptWriteInterval();

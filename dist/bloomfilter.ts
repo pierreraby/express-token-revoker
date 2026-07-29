@@ -1,28 +1,37 @@
 /**
  * Copyright (c) 2018, Jason Davies : https://github.com/jasondavies/bloomfilter.js
  * Copyright (c) 2025, Pierre Raby
- * 
+ *
  * Minor modifications made by Pierre Raby: use of Class syntax and JSDoc annotations.
-*/
+ */
 
 /**
- * @typedef {number | number[]} MParam
  * A number specifying the total bits of the filter, or an array-like object of 32-bit integers.
  */
+export type MParam = number | ArrayLike<number>;
+
+type Buckets = Int32Array | number[];
+type Locations = Uint8Array | Uint16Array | Uint32Array | number[];
 
 /**
  * A modern BloomFilter implementation with JSDoc-based type annotations.
  */
 export class BloomFilter {
+  typedArrays: boolean;
+  m: number;
+  k: number;
+  buckets: Buckets;
+  _locations: Locations;
+
   /**
    * Creates a new BloomFilter.
-   * @param {MParam} m - Number of bits or array of 32-bit integers.
-   * @param {number} k - Number of hash functions.
+   * @param m - Number of bits or array of 32-bit integers.
+   * @param k - Number of hash functions.
    */
-  constructor(m, k) {
+  constructor(m: MParam, k: number) {
     this.typedArrays = typeof ArrayBuffer !== "undefined";
 
-    let arrayLike;
+    let arrayLike: ArrayLike<number> | undefined;
     if (typeof m !== "number") {
       arrayLike = m;
       m = arrayLike.length * 32;
@@ -33,7 +42,7 @@ export class BloomFilter {
     this.k = k;
 
     if (this.typedArrays) {
-      const kbytes = 1 << Math.ceil(Math.log2(Math.ceil(Math.log2(this.m) / 8))); 
+      const kbytes = 1 << Math.ceil(Math.log2(Math.ceil(Math.log2(this.m) / 8)));
       const ArrayType = kbytes === 1 ? Uint8Array : kbytes === 2 ? Uint16Array : Uint32Array;
       const kbuffer = new ArrayBuffer(kbytes * k);
       const buckets = new Int32Array(n);
@@ -46,7 +55,7 @@ export class BloomFilter {
       this.buckets = buckets;
       this._locations = new ArrayType(kbuffer);
     } else {
-      const buckets = [];
+      const buckets: number[] = [];
       if (arrayLike) {
         for (let i = 0; i < n; i++) {
           buckets[i] = arrayLike[i];
@@ -63,13 +72,12 @@ export class BloomFilter {
 
   /**
    * Calculates the bit positions for a given string (double-hashing strategy).
-   * @param {string} v - The string to be hashed.
-   * @returns {number[]}
+   * @param v - The string to be hashed.
    */
-  locations(v) {
+  locations(v: string): Locations {
     const { k, m, _locations } = this;
-    let a;
-    let b;
+    let a = 0;
+    let b = 0;
 
     // FNV-1a 64-bit hash
     {
@@ -114,10 +122,8 @@ export class BloomFilter {
 
   /**
    * Adds a value to the filter.
-   * @param {string} v
-   * @returns {void}
    */
-  add(v) {
+  add(v: string): void {
     const locs = this.locations(String(v));
     for (let i = 0; i < this.k; i++) {
       this.buckets[locs[i] >> 5] |= 1 << (locs[i] & 0x1f);
@@ -126,10 +132,8 @@ export class BloomFilter {
 
   /**
    * Checks if a value is possibly in the filter.
-   * @param {string} v
-   * @returns {boolean}
    */
-  test(v) {
+  test(v: string): boolean {
     const locs = this.locations(String(v));
     for (let i = 0; i < this.k; i++) {
       if (!(this.buckets[locs[i] >> 5] & (1 << (locs[i] & 0x1f)))) {
@@ -141,17 +145,15 @@ export class BloomFilter {
 
   /**
    * Approximates the number of elements in the filter.
-   * @returns {number}
    */
-  size() {
+  size(): number {
     return -this.m * Math.log(1 - this.countBits() / this.m) / this.k;
   }
 
   /**
    * Counts the number of bits set to 1.
-   * @returns {number}
    */
-  countBits() {
+  countBits(): number {
     const { buckets } = this;
     let bits = 0;
     for (let i = 0; i < buckets.length; i++) {
@@ -162,23 +164,19 @@ export class BloomFilter {
 
   /**
    * Approximates the current false-positive error rate.
-   * @returns {number}
    */
-  error() {
+  error(): number {
     return (this.countBits() / this.m) ** this.k;
   }
 
   /**
    * Merges two BloomFilters into a new one, doing a union of their bits.
-   * @param {BloomFilter} a
-   * @param {BloomFilter} b
-   * @returns {BloomFilter}
    */
-  static union(a, b) {
+  static union(a: BloomFilter, b: BloomFilter): BloomFilter {
     if (a.m === b.m && a.k === b.k) {
       const typedArrays = typeof ArrayBuffer !== "undefined";
       const l = a.m >> 5;
-      const c = typedArrays ? new Int32Array(l) : new Array(l);
+      const c: Buckets = typedArrays ? new Int32Array(l) : new Array(l);
       for (let i = 0; i < l; i++) {
         c[i] = a.buckets[i] | b.buckets[i];
       }
@@ -189,15 +187,12 @@ export class BloomFilter {
 
   /**
    * Intersects two BloomFilters into a new one.
-   * @param {BloomFilter} a
-   * @param {BloomFilter} b
-   * @returns {BloomFilter}
    */
-  static intersection(a, b) {
+  static intersection(a: BloomFilter, b: BloomFilter): BloomFilter {
     if (a.m === b.m && a.k === b.k) {
       const typedArrays = typeof ArrayBuffer !== "undefined";
       const l = a.m >> 5;
-      const c = typedArrays ? new Int32Array(l) : new Array(l);
+      const c: Buckets = typedArrays ? new Int32Array(l) : new Array(l);
       for (let i = 0; i < l; i++) {
         c[i] = a.buckets[i] & b.buckets[i];
       }
@@ -208,11 +203,10 @@ export class BloomFilter {
 
   /**
    * Creates a BloomFilter based on target error rate.
-   * @param {number} n - Expected number of items.
-   * @param {number} error - Desired false-positive rate.
-   * @returns {BloomFilter}
+   * @param n - Expected number of items.
+   * @param error - Desired false-positive rate.
    */
-  static withTargetError(n, error) {
+  static withTargetError(n: number, error: number): BloomFilter {
     const m = Math.ceil((-n * Math.log2(error)) / Math.LN2);
     const k = Math.ceil((Math.LN2 * m) / n);
     return new BloomFilter(m, k);
@@ -221,10 +215,8 @@ export class BloomFilter {
 
 /**
  * Counts bits set to 1 in a 32-bit integer.
- * @param {number} v 
- * @returns {number}
  */
-function popcnt(v) {
+function popcnt(v: number): number {
   // http://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
   v -= (v >> 1) & 0x55555555;
   v = (v & 0x33333333) + ((v >> 2) & 0x33333333);

@@ -1,5 +1,3 @@
-// @ts-check
-
 import { BloomFilterManager } from "./Bloom-filter-manager.js";
 import { createJWTMiddleware, createOpaqueMiddleware } from "./createMiddlewares.js";
 import { ValidationError, InternalError } from './errors.js';
@@ -7,95 +5,89 @@ import throttle from "throttleit";
 import { stopServer, startServer } from "./grpc/std-server.js";
 import { revokerInputSchema } from "./Inputs-validation.js";
 import RevokerStore from "./revokerStore.js";
-
-import './types.js';
+import type { GenericLogger, RevokerStore as RevokerStoreType } from './types.js';
+import type { RequestHandler } from 'express';
 
 /**
- * @typedef {import('./types.js').GenericLogger} GenericLogger
- * @typedef {import('./types.js').RevokerStore} RevokerStore
- * @typedef {import('express').RequestHandler} RequestHandler
-*/
+ * Configuration options for the Bloom filter.
+ */
+export interface FilterConfig {
+  /** Number of items to store in the Bloom filter */
+  numItems: number;
+  /** Target false positive rate for the Bloom filter */
+  fpRate: number;
+  /** Rotation interval in milliseconds */
+  rotateTime: number;
+  /** whether to enable backup */
+  backup?: boolean;
+  /** Ratio of the rotation time for backups (e.g., 4 for backup every rotateTime / 4). Defaults to no backups. */
+  backupRatioTime?: number;
+  /** The absolute path to the backup directory. Defaults to a 'backup' directory relative to the current file. */
+  backupDir?: string;
+  /** Whether to enable buffering of items to add to the Bloom filter. Defaults to false. */
+  bufferEnabled?: boolean;
+}
+
+interface ConfigBase {
+  /** The ID of the Revoker instance. */
+  id: string;
+  /** Any logger implementing the basic logging methods */
+  logger: GenericLogger;
+  /** Whether to enable gRPC. */
+  grpcEnabled?: boolean;
+  /** The port for the gRPC server. */
+  grpcPort?: number;
+  /** Configuration options for the Bloom filter. */
+  filter: FilterConfig;
+}
+
+export type JWTConfig = ConfigBase & { claimsToCheck: string[]; payloadKey: string; opaqueHeader?: never };
+export type OpaqueConfig = ConfigBase & { opaqueHeader: string; claimsToCheck?: never; payloadKey?: never };
+export type Config = JWTConfig | OpaqueConfig;
+
+/**
+ * Functions for gRPC server management.
+ */
+export interface gRPCFunctions {
+  /** Function to start the gRPC server. */
+  startServerFn?: typeof startServer;
+  /** Function to stop the gRPC server if the last ID is removed. */
+  stopServerFn?: typeof stopServer;
+}
 
 /**
  * Revoker class to manage middleware and adding items to the Bloom filter.
  */
 export class Revoker {
-  
-  /** @type {BloomFilterManager | null} */
-  bloomFilterManager = null;
-
-  /** @type {RequestHandler | null} */
-  middleware = null;
-
-  /** @type {string} */
-  id;
-
-  /** @type {GenericLogger} */
-  logger;
-
-  /** @type {boolean} */
-  grpcEnabled;
-
-  /** @type {number} */
-  grpcPort;
-
-  /** @types  {Function} */
-  startServer;
-
-  /** @types  {Function} */
-  stopServer;
-
-  /** @types  {RevokerStore} */
-  revokerStore
-
-  /** @type {boolean} */
+  bloomFilterManager: BloomFilterManager | null = null;
+  middleware: RequestHandler | null = null;
+  id: string;
+  logger: GenericLogger;
+  grpcEnabled: boolean;
+  grpcPort: number;
+  startServer: typeof startServer;
+  stopServer: typeof stopServer;
+  revokerStore: RevokerStoreType;
   static grpcServerStarted = false;
 
   /**
-   * @typedef {Object} FilterConfig
-   * @property {number} numItems - Number of items to store in the Bloom filter
-   * @property {number} fpRate - Target false positive rate for the Bloom filter
-   * @property {number} rotateTime - Rotation interval in milliseconds
-   * @property {boolean} [backup] - whether to enable backup
-   * @property {number} [backupRatioTime] - Ratio of the rotation time for backups (e.g., 4 for backup every rotateTime / 4).  Defaults to no backups.
-   * @property {string} [backupDir] - The absolute path to the backup directory.  Defaults to a 'backup' directory relative to the current file.
-   * @property {boolean} [bufferEnabled] - Whether to enable buffering of items to add to the Bloom filter.  Defaults to false.
-   */
-  
-  /**
-   * @typedef {Object} ConfigBase
-   * @property {string} id - The ID of the Revoker instance.
-   * @property {GenericLogger} logger - Any logger implementing the basic logging methods
-   * @property {boolean} [grpcEnabled] - Whether to enable gRPC.
-   * @property {number} [grpcPort] - The port for the gRPC server.
-   * @property {FilterConfig} filter - Configuration options for the Bloom filter.
-   * @typedef {ConfigBase & { claimsToCheck: Array<string>, payloadKey: string, opaqueHeader?: never }} JWTConfig
-   * @typedef {ConfigBase & { opaqueHeader: string, claimsToCheck?: never, payloadKey?: never }} OpaqueConfig
-   * @typedef {JWTConfig | OpaqueConfig} Config
-   */
-  /**
-   * @typedef {Object} gRPCFunctions
-   * @property {Function} [startServerFn] - Function to start the gRPC server.
-   * @property {Function} [stopServerFn] - Function to stop the gRPC server if the last ID is removed.
-   */
-
-  /**
-   * @param {Config} config - Configuration options.
-   * @param {gRPCFunctions} [grpcFunctions] - Functions for gRPC server management.
-   * @param {RevokerStore} [revokerStore] - The RevokerStore instance.
+   * @param config - Configuration options.
+   * @param grpcFunctions - Functions for gRPC server management.
+   * @param revokerStore - The RevokerStore instance.
    * The parameters `startServerFn`, `stopServerFn`, and `revokerStore` are
    * reserved for testing and dependency injection to facilitate testing.
    * They should not be used or modified in production.
    * @throws {ValidationError} If the configuration is invalid.
    * @throws {Error} If neither `claimsToCheck` nor `opaqueHeader` is provided.
    */
-  constructor(config, {
-    startServerFn = startServer,
-    stopServerFn = stopServer
-    } = {},
-    revokerStore = RevokerStore
-  ) 
-  {
+  constructor(
+    config: Config,
+    {
+      startServerFn = startServer,
+      stopServerFn = stopServer
+    }: gRPCFunctions = {},
+    revokerStore: RevokerStoreType = RevokerStore
+  ) {
 
     const { error } = revokerInputSchema.validate(config);
     if (error) {
@@ -104,7 +96,7 @@ export class Revoker {
 
     const {
       id, claimsToCheck, payloadKey, opaqueHeader, grpcEnabled = false, grpcPort, logger = console, filter
-    } = config;   
+    } = config;
 
     try {
       this.bloomFilterManager = new BloomFilterManager({ id, logger, ...filter });
@@ -112,7 +104,7 @@ export class Revoker {
       throw new InternalError(`Failed to initialize BloomFilterManager: ${error.message}`);
     }
 
-    const throttleLog = throttle((message) => logger.info(message), 60000);
+    const throttleLog = throttle((message: string) => logger.info(message), 60000);
 
     this.id = id;
     this.logger = logger;
@@ -120,7 +112,7 @@ export class Revoker {
     if (claimsToCheck) {
       this.middleware = createJWTMiddleware(
         claimsToCheck,
-        payloadKey,
+        payloadKey!,
         this.bloomFilterManager,
         logger,
         throttleLog
@@ -148,10 +140,10 @@ export class Revoker {
 
   /**
    * Initializes the grpc server.
-   * @returns {Promise<Revoker>} The Revoker instance.
+   * @returns The Revoker instance.
    * @throws {Error} If the gRPC server fails to start.
    */
-  async _grpcInit() {
+  async _grpcInit(): Promise<Revoker> {
     if (this.grpcEnabled && this.grpcPort) {
       if (!Revoker.grpcServerStarted) {
         this.logger.info(`Starting gRPC server with id: ${this.id}`);
@@ -175,10 +167,10 @@ export class Revoker {
 
   /**
    * Returns the configured middleware.
-   * @returns {RequestHandler} Middleware Express.
+   * @returns Middleware Express.
    * @throws {Error} If the middleware is not configured.
    */
-  getMiddleware() {
+  getMiddleware(): RequestHandler {
     if (!this.middleware) {
       throw new Error("Middleware not configured");
     }
@@ -187,19 +179,18 @@ export class Revoker {
 
   /**
    * Adds an item to the Bloom filter.
-   * @param {string} filterItem - The item to add.
-   * @returns {void}
+   * @param filterItem - The item to add.
    * @throws {Error} If the item is invalid.
    */
-  add(filterItem) {
+  add(filterItem: string): void {
     if (this.grpcEnabled) {
       throw new Error("gRPC is enabled, use the gRPC method instead");
     }
-    
+
     if (!this.bloomFilterManager) {
       throw new Error("Bloom filter manager not initialized");
     }
-  
+
     try {
       this.bloomFilterManager.add(filterItem);
     } catch (error) {
@@ -210,19 +201,19 @@ export class Revoker {
 
   /**
    * Checks if an item exists in the Bloom filter.
-   * @param {string} item - The item to check.
-   * @returns {boolean} True if the item may exist, false otherwise.
+   * @param item - The item to check.
+   * @returns True if the item may exist, false otherwise.
    * @throws {Error} If the Bloom filter manager is not initialized.
    */
-  has(item) {
+  has(item: string): boolean {
     if (this.grpcEnabled) {
       throw new Error("gRPC is enabled, use the gRPC method instead");
     }
-    
+
     if (!this.bloomFilterManager) {
       throw new Error("Bloom filter manager not initialized");
     }
-  
+
     try {
       return this.bloomFilterManager.has(item);
     } catch (error) {
@@ -233,27 +224,26 @@ export class Revoker {
 
   /**
    * Get metrics for the Bloom filter.
-   * @returns {Object} Metrics object.
+   * @returns Metrics object.
    * @throws {Error} If the Bloom filter manager is not initialized.
    */
   getMetrics() {
     if (this.grpcEnabled) {
       throw new Error("gRPC is enabled, use the gRPC method instead");
     }
-    
+
     if (!this.bloomFilterManager) {
       throw new Error("Bloom filter manager not initialized");
     }
-  
+
     return this.bloomFilterManager.getMetrics();
   }
 
   /**
    * Resets and restore the Bloom filter.
-   * @returns {Promise<void>}
    * @throws {Error} If an error occurs during the reset or restoration.
    */
-  async resetAndRestore() {
+  async resetAndRestore(): Promise<void> {
     if (this.grpcEnabled) {
       throw new Error("gRPC is enabled, use the gRPC method instead");
     }
@@ -273,10 +263,9 @@ export class Revoker {
 
   /**
    * Resets the Bloom filter and clears data.
-   * @returns {Promise<void>}
    * @throws {Error} If an error occurs during the reset or data clearance.
    */
-  async resetAndClearData() {
+  async resetAndClearData(): Promise<void> {
     if (this.grpcEnabled) {
       throw new Error("gRPC is enabled, use the gRPC method instead");
     }
@@ -296,9 +285,8 @@ export class Revoker {
 
   /**
    * Destroys the Bloom filter manager.
-   * @returns {Promise<void>}
    */
-  async destroy() {
+  async destroy(): Promise<void> {
     try {
       if (this.grpcEnabled && Revoker.grpcServerStarted) {
         this.revokerStore.unregisterInstance(this.id);
@@ -309,7 +297,7 @@ export class Revoker {
           this.revokerStore.destroy();
           await this.stopServer(this.logger);
           Revoker.grpcServerStarted = false;
-        }      
+        }
       }
       if (this.bloomFilterManager) {
         this.bloomFilterManager.destroy();
@@ -327,16 +315,15 @@ export class Revoker {
 
 /**
  * Creates a Revoker instance.
- * @param {Config} config - Configuration options.
- * @param {gRPCFunctions} [grpcFunctions] - Functions for gRPC server management.
+ * @param config - Configuration options.
+ * @param grpcFunctions - Functions for gRPC server management.
  * This function is **exported for testing purposes only**. It is **not** part of the public
  * API and should not be used or modified in production.
- * @returns {Promise<Revoker>} The Revoker instance.
+ * @returns The Revoker instance.
  * @throws {Error} If the configuration is invalid.
  * @throws {Error} If the gRPC server fails to start.
  */
-export async function createRevoker(config, grpcFunctions = {}) {
+export async function createRevoker(config: Config, grpcFunctions: gRPCFunctions = {}): Promise<Revoker> {
   const revoker = new Revoker(config, grpcFunctions);
   return await revoker._grpcInit();
 }
-

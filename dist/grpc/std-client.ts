@@ -18,14 +18,14 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
 });
 
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition);
-const revokerProto = protoDescriptor.revoker;
+const revokerProto: any = protoDescriptor.revoker;
 
 /**
  * Crée un client gRPC pour le service RevokerAdmin.
- * @param {string} serverAddress - L'adresse du serveur gRPC (par exemple, 'localhost:50051').
- * @returns {any} - Une instance du client gRPC.
+ * @param serverAddress - L'adresse du serveur gRPC (par exemple, 'localhost:50051').
+ * @returns Une instance du client gRPC.
  */
-export function createRevokerClient(serverAddress) {
+export function createRevokerClient(serverAddress: string): any {
   const client = new revokerProto.RevokerAdmin(serverAddress, grpc.credentials.createInsecure());
   return client;
 }
@@ -36,7 +36,7 @@ const client = createRevokerClient('localhost:50051');
 
 
 // Exemple d'appel à la méthode ListRevokers
-client.ListRevokers({}, (err, response) => {
+client.ListRevokers({}, (err: any, response: any) => {
   if (err) {
     console.error('Error:', err);
   } else {
@@ -45,7 +45,7 @@ client.ListRevokers({}, (err, response) => {
 });
 
 // Exemple d'appel à la méthode Add
-client.Add({ revokerId: 'JWTrevoker', filterItem: 'yourFilterItem' }, (err, response) => {
+client.Add({ revokerId: 'JWTrevoker', filterItem: 'yourFilterItem' }, (err: any, response: any) => {
   console.log('Add Response:', response);
   if (err) {
     console.error('Error:', err);
@@ -57,7 +57,7 @@ client.Add({ revokerId: 'JWTrevoker', filterItem: 'yourFilterItem' }, (err, resp
 
 
 // Exemple d'appel à la méthode Has
-client.Has({ revokerId: 'JWTrevoker', item: 'yourFilterItem' }, (err, response) => {
+client.Has({ revokerId: 'JWTrevoker', item: 'yourFilterItem' }, (err: any, response: any) => {
   if (err) {
     console.error('Error:', err);
   } else {
@@ -66,20 +66,20 @@ client.Has({ revokerId: 'JWTrevoker', item: 'yourFilterItem' }, (err, response) 
 });
 
 // Exemple d'appel à la méthode getMetrics
-client.GetMetrics({ revokerId: 'JWTrevoker' }, (err, response) => {
+client.GetMetrics({ revokerId: 'JWTrevoker' }, (err: any, response: any) => {
   if (err) {
     console.error('Error:', err);
   } else {
     const estimatedMetrics = response.estimatedMetrics;
     const configuration = response.configuration;
-    
+
     console.log('Estimated Metrics:', estimatedMetrics);
     console.log('Configuration:', configuration);
   }
 });
 
 // Exemple d'appel à la méthode ResetAndRestore
-client.ResetAndRestore({ revokerId: 'JWTrevoker' }, (err, response) => {
+client.ResetAndRestore({ revokerId: 'JWTrevoker' }, (err: any, response: any) => {
   if (err) {
     console.error('Error:', err);
   } else {
@@ -89,7 +89,7 @@ client.ResetAndRestore({ revokerId: 'JWTrevoker' }, (err, response) => {
 
 
 
-client.Has({ revokerId: 'JWTrevoker', item: 'yourFilterItem' }, (err, response) => {
+client.Has({ revokerId: 'JWTrevoker', item: 'yourFilterItem' }, (err: any, response: any) => {
   if (err) {
     console.error('Error:', err);
   } else {
@@ -99,7 +99,7 @@ client.Has({ revokerId: 'JWTrevoker', item: 'yourFilterItem' }, (err, response) 
 
 
 // Exemple d'appel à la méthode ResetAndClearData
-client.ResetAndClearData({ revokerId: 'JWTrevoker' }, (err, response) => {
+client.ResetAndClearData({ revokerId: 'JWTrevoker' }, (err: any, response: any) => {
   if (err) {
     console.error('Error:', err);
   } else {
@@ -110,7 +110,7 @@ client.ResetAndClearData({ revokerId: 'JWTrevoker' }, (err, response) => {
 // wait 1 second
 await new Promise((resolve) => setTimeout(resolve, 1000));
 
-client.Has({ revokerId: 'JWTrevoker', item: 'yourFilterItem' }, (err, response) => {
+client.Has({ revokerId: 'JWTrevoker', item: 'yourFilterItem' }, (err: any, response: any) => {
   if (err) {
     console.error('Error:', err);
   } else {
@@ -119,7 +119,7 @@ client.Has({ revokerId: 'JWTrevoker', item: 'yourFilterItem' }, (err, response) 
 });
 
 // Exemple d'appel à la méthode Destroy
-client.Destroy({ revokerId: 'JWTrevoker' }, (err, response) => {
+client.Destroy({ revokerId: 'JWTrevoker' }, (err: any, response: any) => {
   if (err) {
     console.error('Error:', err);
   } else {
@@ -128,7 +128,7 @@ client.Destroy({ revokerId: 'JWTrevoker' }, (err, response) => {
 });
 
 // Exemple d'appel à la méthode ListRevokers
-client.ListRevokers({}, (err, response) => {
+client.ListRevokers({}, (err: any, response: any) => {
   if (err) {
     console.error('Error:', err);
   } else {
