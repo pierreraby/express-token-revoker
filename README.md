@@ -323,4 +323,4 @@ npm run client  # exercises the API in another terminal
 
 ## License
 
-MIT — see [LICENCE](./LICENCE). Includes `src/bloomfilter.ts`, derived from Jason Davies' [bloomfilter.js](https://github.com/jasondavies/bloomfilter.js) (MIT).
+MIT — see [LICENSE](./LICENSE). Includes `src/bloomfilter.ts`, derived from Jason Davies' [bloomfilter.js](https://github.com/jasondavies/bloomfilter.js) (BSD-3-Clause).
