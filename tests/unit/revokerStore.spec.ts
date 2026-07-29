@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import RevokerStore from '../../dist/revokerStore.js';
 import { createMockLogger, type MockLogger } from '../helpers/mock-logger.js';
 
@@ -120,5 +120,40 @@ describe('RevokerStore validation', () => {
   it('RevokerStore - isEmpty should throw error if store is not initialized', () => {
     RevokerStore.destroy();
     expect(() => RevokerStore.isEmpty()).toThrow('Revoker instances map is not initialized');
+  });
+
+  it('RevokerStore - is frozen (no mutations after creation)', () => {
+    expect(Object.isFrozen(RevokerStore)).toBe(true);
+    expect(() => {
+      (RevokerStore as any).extraMethod = vi.fn();
+    }).toThrow();
+  });
+
+  it('RevokerStore - multiple instances share the same store', () => {
+    const instance2 = {
+      id: 'test-revoker-2',
+      logger: createMockLogger(),
+      bloomFilterManager: {},
+    };
+    RevokerStore.registerInstance(revokerInstance);
+    RevokerStore.registerInstance(instance2);
+    expect(RevokerStore.listInstances()).toEqual([revokerInstance.id, instance2.id]);
+    RevokerStore.unregisterInstance(revokerInstance.id);
+    expect(RevokerStore.listInstances()).toEqual([instance2.id]);
+    expect(RevokerStore.isEmpty()).toBe(false);
+  });
+
+  it('RevokerStore - init after destroy reinitializes cleanly', () => {
+    RevokerStore.registerInstance(revokerInstance);
+    RevokerStore.destroy();
+    RevokerStore.init();
+    expect(RevokerStore.isEmpty()).toBe(true);
+    expect(RevokerStore.listInstances()).toEqual([]);
+  });
+
+  it('RevokerStore - destroy with instances clears all', () => {
+    RevokerStore.registerInstance(revokerInstance);
+    RevokerStore.destroy();
+    expect(() => RevokerStore.listInstances()).toThrow('Revoker instances map is not initialized');
   });
 });
