@@ -1,10 +1,10 @@
-import { BloomFilterManager } from "./Bloom-filter-manager.js";
-import { createJWTMiddleware, createOpaqueMiddleware } from "./createMiddlewares.js";
+import { BloomFilterManager } from './Bloom-filter-manager.js';
+import { createJWTMiddleware, createOpaqueMiddleware } from './createMiddlewares.js';
 import { ValidationError, InternalError } from './errors.js';
-import throttle from "throttleit";
-import { stopServer, startServer } from "./grpc/std-server.js";
-import { revokerInputSchema } from "./Inputs-validation.js";
-import RevokerStore from "./revokerStore.js";
+import throttle from 'throttleit';
+import { stopServer, startServer } from './grpc/std-server.js';
+import { revokerInputSchema } from './Inputs-validation.js';
+import RevokerStore from './revokerStore.js';
 import type { GenericLogger, RevokerStore as RevokerStoreType } from './types.js';
 import type { RequestHandler } from 'express';
 
@@ -41,8 +41,16 @@ interface ConfigBase {
   filter: FilterConfig;
 }
 
-export type JWTConfig = ConfigBase & { claimsToCheck: string[]; payloadKey: string; opaqueHeader?: never };
-export type OpaqueConfig = ConfigBase & { opaqueHeader: string; claimsToCheck?: never; payloadKey?: never };
+export type JWTConfig = ConfigBase & {
+  claimsToCheck: string[];
+  payloadKey: string;
+  opaqueHeader?: never;
+};
+export type OpaqueConfig = ConfigBase & {
+  opaqueHeader: string;
+  claimsToCheck?: never;
+  payloadKey?: never;
+};
 export type Config = JWTConfig | OpaqueConfig;
 
 /**
@@ -82,20 +90,23 @@ export class Revoker {
    */
   constructor(
     config: Config,
-    {
-      startServerFn = startServer,
-      stopServerFn = stopServer
-    }: gRPCFunctions = {},
+    { startServerFn = startServer, stopServerFn = stopServer }: gRPCFunctions = {},
     revokerStore: RevokerStoreType = RevokerStore
   ) {
-
     const { error } = revokerInputSchema.validate(config);
     if (error) {
       throw new ValidationError(`Invalid input: ${error.message}`);
     }
 
     const {
-      id, claimsToCheck, payloadKey, opaqueHeader, grpcEnabled = false, grpcPort, logger = console, filter
+      id,
+      claimsToCheck,
+      payloadKey,
+      opaqueHeader,
+      grpcEnabled = false,
+      grpcPort,
+      logger = console,
+      filter,
     } = config;
 
     try {
@@ -122,11 +133,11 @@ export class Revoker {
         opaqueHeader,
         this.bloomFilterManager,
         logger,
-        throttleLog,
+        throttleLog
       );
     } else {
       this.bloomFilterManager.destroy();
-      throw new ValidationError("claimsToCheck or opaqueHeader must be provided");
+      throw new ValidationError('claimsToCheck or opaqueHeader must be provided');
     }
 
     this.grpcEnabled = grpcEnabled;
@@ -135,7 +146,6 @@ export class Revoker {
     this.startServer = startServerFn;
     this.stopServer = stopServerFn;
     this.revokerStore = revokerStore;
-
   }
 
   /**
@@ -158,7 +168,7 @@ export class Revoker {
           throw new Error(`Failed to start gRPC server: ${error.message}`);
         }
       } else {
-        this.logger.info("gRPC server is already started.");
+        this.logger.info('gRPC server is already started.');
         this.revokerStore.registerInstance(this);
       }
     }
@@ -172,7 +182,7 @@ export class Revoker {
    */
   getMiddleware(): RequestHandler {
     if (!this.middleware) {
-      throw new Error("Middleware not configured");
+      throw new Error('Middleware not configured');
     }
     return this.middleware;
   }
@@ -184,11 +194,11 @@ export class Revoker {
    */
   add(filterItem: string): void {
     if (this.grpcEnabled) {
-      throw new Error("gRPC is enabled, use the gRPC method instead");
+      throw new Error('gRPC is enabled, use the gRPC method instead');
     }
 
     if (!this.bloomFilterManager) {
-      throw new Error("Bloom filter manager not initialized");
+      throw new Error('Bloom filter manager not initialized');
     }
 
     try {
@@ -207,11 +217,11 @@ export class Revoker {
    */
   has(item: string): boolean {
     if (this.grpcEnabled) {
-      throw new Error("gRPC is enabled, use the gRPC method instead");
+      throw new Error('gRPC is enabled, use the gRPC method instead');
     }
 
     if (!this.bloomFilterManager) {
-      throw new Error("Bloom filter manager not initialized");
+      throw new Error('Bloom filter manager not initialized');
     }
 
     try {
@@ -229,11 +239,11 @@ export class Revoker {
    */
   getMetrics() {
     if (this.grpcEnabled) {
-      throw new Error("gRPC is enabled, use the gRPC method instead");
+      throw new Error('gRPC is enabled, use the gRPC method instead');
     }
 
     if (!this.bloomFilterManager) {
-      throw new Error("Bloom filter manager not initialized");
+      throw new Error('Bloom filter manager not initialized');
     }
 
     return this.bloomFilterManager.getMetrics();
@@ -245,16 +255,16 @@ export class Revoker {
    */
   async resetAndRestore(): Promise<void> {
     if (this.grpcEnabled) {
-      throw new Error("gRPC is enabled, use the gRPC method instead");
+      throw new Error('gRPC is enabled, use the gRPC method instead');
     }
 
     if (!this.bloomFilterManager) {
-      throw new Error("Bloom filter manager not initialized");
+      throw new Error('Bloom filter manager not initialized');
     }
 
     try {
       await this.bloomFilterManager.resetAndRestore();
-      this.logger.info("Bloom filter has been reset and restored successfully.");
+      this.logger.info('Bloom filter has been reset and restored successfully.');
     } catch (error) {
       this.logger.error('Error in Revoker.resetAndRestore:', error);
       throw error;
@@ -267,16 +277,16 @@ export class Revoker {
    */
   async resetAndClearData(): Promise<void> {
     if (this.grpcEnabled) {
-      throw new Error("gRPC is enabled, use the gRPC method instead");
+      throw new Error('gRPC is enabled, use the gRPC method instead');
     }
 
     if (!this.bloomFilterManager) {
-      throw new Error("Bloom filter manager not initialized");
+      throw new Error('Bloom filter manager not initialized');
     }
 
     try {
       await this.bloomFilterManager.resetAndClearData();
-      this.logger.info("Bloom filter has been reset and data cleared successfully.");
+      this.logger.info('Bloom filter has been reset and data cleared successfully.');
     } catch (error) {
       this.logger.error('Error in revoker.resetAndClearData:', error);
       throw error;
@@ -293,7 +303,7 @@ export class Revoker {
         this.logger.info(`unregistering instance : ${this.id}`);
         this.grpcEnabled = false;
         if (this.revokerStore.isEmpty()) {
-          this.logger.info("Stopping gRPC server");
+          this.logger.info('Stopping gRPC server');
           this.revokerStore.destroy();
           await this.stopServer(this.logger);
           Revoker.grpcServerStarted = false;
@@ -304,10 +314,10 @@ export class Revoker {
         this.middleware = null;
         this.bloomFilterManager = null;
       } else {
-        this.logger.warn("Bloom filter manager already destroyed");
+        this.logger.warn('Bloom filter manager already destroyed');
       }
     } catch (error) {
-      this.logger.error("Error during Revoker destruction:", error);
+      this.logger.error('Error during Revoker destruction:', error);
       throw new InternalError(`Failed to destroy Revoker: ${error.message}`);
     }
   }
@@ -323,7 +333,10 @@ export class Revoker {
  * @throws {Error} If the configuration is invalid.
  * @throws {Error} If the gRPC server fails to start.
  */
-export async function createRevoker(config: Config, grpcFunctions: gRPCFunctions = {}): Promise<Revoker> {
+export async function createRevoker(
+  config: Config,
+  grpcFunctions: gRPCFunctions = {}
+): Promise<Revoker> {
   const revoker = new Revoker(config, grpcFunctions);
   return await revoker._grpcInit();
 }

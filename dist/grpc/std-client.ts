@@ -14,7 +14,7 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
   longs: String,
   enums: String,
   defaults: true,
-  oneofs: true
+  oneofs: true,
 });
 
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition);
@@ -32,8 +32,6 @@ export function createRevokerClient(serverAddress: string): any {
 
 // Exemple d'utilisation du client
 const client = createRevokerClient('localhost:50051');
-
-
 
 // Exemple d'appel à la méthode ListRevokers
 client.ListRevokers({}, (err: any, response: any) => {
@@ -53,8 +51,6 @@ client.Add({ revokerId: 'JWTrevoker', filterItem: 'yourFilterItem' }, (err: any,
     console.log('Add Response:', response);
   }
 });
-
-
 
 // Exemple d'appel à la méthode Has
 client.Has({ revokerId: 'JWTrevoker', item: 'yourFilterItem' }, (err: any, response: any) => {
@@ -87,8 +83,6 @@ client.ResetAndRestore({ revokerId: 'JWTrevoker' }, (err: any, response: any) =>
   }
 });
 
-
-
 client.Has({ revokerId: 'JWTrevoker', item: 'yourFilterItem' }, (err: any, response: any) => {
   if (err) {
     console.error('Error:', err);
@@ -96,7 +90,6 @@ client.Has({ revokerId: 'JWTrevoker', item: 'yourFilterItem' }, (err: any, respo
     console.log('Has Response:', response);
   }
 });
-
 
 // Exemple d'appel à la méthode ResetAndClearData
 client.ResetAndClearData({ revokerId: 'JWTrevoker' }, (err: any, response: any) => {

@@ -29,10 +29,10 @@ export class BloomFilter {
    * @param k - Number of hash functions.
    */
   constructor(m: MParam, k: number) {
-    this.typedArrays = typeof ArrayBuffer !== "undefined";
+    this.typedArrays = typeof ArrayBuffer !== 'undefined';
 
     let arrayLike: ArrayLike<number> | undefined;
-    if (typeof m !== "number") {
+    if (typeof m !== 'number') {
       arrayLike = m;
       m = arrayLike.length * 32;
     }
@@ -83,8 +83,14 @@ export class BloomFilter {
     {
       const fnv64PrimeX = 0x01b3;
       const length = v.length;
-      let t0 = 0, t1 = 0, t2 = 0, t3 = 0;
-      let v0 = 0x2325, v1 = 0x8422, v2 = 0x9ce4, v3 = 0xcbf2;
+      let t0 = 0,
+        t1 = 0,
+        t2 = 0,
+        t3 = 0;
+      let v0 = 0x2325,
+        v1 = 0x8422,
+        v2 = 0x9ce4,
+        v3 = 0xcbf2;
 
       for (let i = 0; i < length; i++) {
         v0 ^= v.charCodeAt(i);
@@ -107,8 +113,8 @@ export class BloomFilter {
     }
 
     // Make sure they're within range
-    a = (a % m + m) % m;
-    b = (b % m + m) % m;
+    a = ((a % m) + m) % m;
+    b = ((b % m) + m) % m;
 
     // Enhanced double hashing
     _locations[0] = a;
@@ -147,7 +153,7 @@ export class BloomFilter {
    * Approximates the number of elements in the filter.
    */
   size(): number {
-    return -this.m * Math.log(1 - this.countBits() / this.m) / this.k;
+    return (-this.m * Math.log(1 - this.countBits() / this.m)) / this.k;
   }
 
   /**
@@ -174,7 +180,7 @@ export class BloomFilter {
    */
   static union(a: BloomFilter, b: BloomFilter): BloomFilter {
     if (a.m === b.m && a.k === b.k) {
-      const typedArrays = typeof ArrayBuffer !== "undefined";
+      const typedArrays = typeof ArrayBuffer !== 'undefined';
       const l = a.m >> 5;
       const c: Buckets = typedArrays ? new Int32Array(l) : new Array(l);
       for (let i = 0; i < l; i++) {
@@ -182,7 +188,7 @@ export class BloomFilter {
       }
       return new BloomFilter(c, a.k);
     }
-    throw new Error("Bloom filters must have identical {m, k}.");
+    throw new Error('Bloom filters must have identical {m, k}.');
   }
 
   /**
@@ -190,7 +196,7 @@ export class BloomFilter {
    */
   static intersection(a: BloomFilter, b: BloomFilter): BloomFilter {
     if (a.m === b.m && a.k === b.k) {
-      const typedArrays = typeof ArrayBuffer !== "undefined";
+      const typedArrays = typeof ArrayBuffer !== 'undefined';
       const l = a.m >> 5;
       const c: Buckets = typedArrays ? new Int32Array(l) : new Array(l);
       for (let i = 0; i < l; i++) {
@@ -198,7 +204,7 @@ export class BloomFilter {
       }
       return new BloomFilter(c, a.k);
     }
-    throw new Error("Bloom filters must have identical {m, k}.");
+    throw new Error('Bloom filters must have identical {m, k}.');
   }
 
   /**
@@ -220,5 +226,5 @@ function popcnt(v: number): number {
   // http://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
   v -= (v >> 1) & 0x55555555;
   v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
-  return ((v + (v >> 4) & 0xf0f0f0f) * 0x1010101) >> 24;
+  return (((v + (v >> 4)) & 0xf0f0f0f) * 0x1010101) >> 24;
 }

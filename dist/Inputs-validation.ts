@@ -1,21 +1,17 @@
 import Joi from 'joi';
 
 const revokerInputSchema = Joi.object({
-  id: Joi.string()
-    .required()
-    .description('Unique identifier for the revoker an bloom filter'),
+  id: Joi.string().required().description('Unique identifier for the revoker an bloom filter'),
   logger: Joi.object({
     info: Joi.function().required(),
     error: Joi.function().required(),
     warn: Joi.function().required(),
     debug: Joi.function().required(),
-    })
+  })
     .unknown(true)
     .required()
     .description('Generice logger object'),
-  grpcEnabled: Joi.boolean()
-    .strict()
-    .description('Enable gRPC server'),
+  grpcEnabled: Joi.boolean().strict().description('Enable gRPC server'),
   grpcPort: Joi.number()
     .strict()
     .port()
@@ -33,24 +29,19 @@ const revokerInputSchema = Joi.object({
     .when('opaqueHeader', { is: Joi.exist(), then: Joi.forbidden() })
     .when('claimsToCheck', { is: Joi.exist(), then: Joi.required() })
     .description('Key to get jwt payload from request'),
-  opaqueHeader: Joi.string()
-    .description('Header to check opaque token'),
-  filter: Joi.object()
-    .required()
-    .description('Bloom filter configuration'),
+  opaqueHeader: Joi.string().description('Header to check opaque token'),
+  filter: Joi.object().required().description('Bloom filter configuration'),
 });
 
 const filterInputSchema = Joi.object({
   // revalidate id and logger schema to keep the bloom filter validation independent
-  id: Joi.string() 
-    .required()
-    .description('Unique identifier for the revoker an bloom filter'),
+  id: Joi.string().required().description('Unique identifier for the revoker an bloom filter'),
   logger: Joi.object({
     info: Joi.function().required(),
     error: Joi.function().required(),
     warn: Joi.function().required(),
     debug: Joi.function().required(),
-    })
+  })
     .unknown(true)
     .required()
     .description('Generice logger object'),
@@ -69,10 +60,8 @@ const filterInputSchema = Joi.object({
     .positive()
     .integer()
     .required()
-    .description('Time to rotate the filter in milliseconds'),  
-  backup: Joi.boolean()
-    .strict()
-    .description('Enable backup filter'),
+    .description('Time to rotate the filter in milliseconds'),
+  backup: Joi.boolean().strict().description('Enable backup filter'),
   backupDir: Joi.string()
     .when('backup', { not: Joi.exist(), then: Joi.forbidden() })
     .when('backup', { is: false, then: Joi.forbidden() })
@@ -88,7 +77,6 @@ const filterInputSchema = Joi.object({
     .when('backup', { not: Joi.exist(), then: Joi.forbidden() })
     .when('backup', { is: false, then: Joi.forbidden() })
     .description('Enable buffer for items added tothe filter'),
-});  
-
+});
 
 export { revokerInputSchema, filterInputSchema };

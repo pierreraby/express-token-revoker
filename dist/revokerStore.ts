@@ -96,9 +96,8 @@ const RevokerStore: RevokerStoreType = (() => {
         throw new Error('Revoker instances map is not initialized');
       }
       return instancesMap.size === 0;
-    }
+    },
   };
-
 })();
 
 Object.freeze(RevokerStore);
