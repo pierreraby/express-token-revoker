@@ -72,7 +72,7 @@
   },
   "overrides": [
     {
-      "includes": ["src/Inputs-validation.ts"],
+      "includes": ["packages/core/src/Inputs-validation.ts"],
       "linter": {
         "rules": {
           "suspicious": {
@@ -82,7 +82,7 @@
       }
     },
     {
-      "includes": ["src/index.ts"],
+      "includes": ["packages/core/src/index.ts"],
       "linter": {
         "rules": {
           "performance": {
