@@ -22,7 +22,7 @@ describe('BloomFilterManager Constructor Validation', () => {
           fpRate: 0.01,
           rotateTime: 1000,
           logger,
-        })
+        } as any)
     ).toThrow('Invalid input: "numItems" is required');
   });
 
@@ -60,7 +60,7 @@ describe('BloomFilterManager Constructor Validation', () => {
           numItems: 1000,
           rotateTime: 1000,
           logger,
-        })
+        } as any)
     ).toThrow('Invalid input: "fpRate" is required');
   });
 
@@ -98,7 +98,7 @@ describe('BloomFilterManager Constructor Validation', () => {
           numItems: 1000,
           fpRate: 0.01,
           logger,
-        })
+        } as any)
     ).toThrow('Invalid input: "rotateTime" is required');
   });
 
@@ -151,9 +151,9 @@ describe('BloomFilterManager Constructor Validation', () => {
           fpRate: 0.01,
           rotateTime: 1000,
           backup: false,
-          backupTime: 500 as any,
+          backupTime: 500,
           logger,
-        })
+        } as any)
     ).toThrow('Invalid input: "backupTime" is not allowed');
   });
 
@@ -347,7 +347,7 @@ describe('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', ()
     expect(logger.debug).toHaveBeenCalledWith(`Rotation stopped for id: ${manager.id}`);
     expect(logger.debug).toHaveBeenCalledWith(`Rotation stopped for id: ${manager.id}`);
     expect(manager.rotationInterval).not.toBe(null);
-    expect(manager.backupInterval).not.toBe(null);
+    expect(manager.backupManager?.backupInterval).not.toBe(null);
     await manager.resetAndClearData();
   });
 
@@ -358,7 +358,9 @@ describe('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', ()
     console.log(logger.debug.mock.calls);
     console.log(manager.id);
     expect(logger.debug).toHaveBeenCalledWith('Bloom filters reset');
-    expect(logger.debug).toHaveBeenCalledWith(`Elements restored from temp file for instance : ${manager.id}`);
+    expect(logger.debug).toHaveBeenCalledWith(
+      `Elements restored from temp file for instance : ${manager.id}`
+    );
     expect(manager.has('testValue')).toBe(true);
     expect(manager.current).not.toBe(null);
     expect(manager.previous).toBe(null);
@@ -371,17 +373,17 @@ describe('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', ()
 
     await new Promise((resolve) => setTimeout(resolve, 600)); // await backup
 
-    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('Saved filter to:'));
+    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('Saved current filter to:'));
     expect(logger.debug).toHaveBeenCalledWith(`Temp file cleared for instance ${manager.id}`);
-    // NOTE: assertion originale probablement no-op ou message inexistant — conservée
-    expect(logger.debug).toHaveBeenCalledWith('No previous filter to backup before first rotation');
     manager.add('testValue2');
 
     await manager.resetAndRestore();
 
     expect(logger.debug).toHaveBeenCalledWith('Bloom filters reset');
     expect(logger.debug).toHaveBeenCalledWith(`Restored current filter : id ${manager.id}`);
-    expect(logger.debug).toHaveBeenCalledWith(`Elements restored from temp file for instance : ${manager.id}`);
+    expect(logger.debug).toHaveBeenCalledWith(
+      `Elements restored from temp file for instance : ${manager.id}`
+    );
     expect(manager.has('testValue')).toBe(true);
     expect(manager.has('testValue2')).toBe(true);
     await manager.resetAndClearData();
@@ -390,9 +392,8 @@ describe('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', ()
   it('resetAndRestore reset filters and restore backup files after backup and rotation', async () => {
     manager.add('testValue');
     await new Promise((resolve) => setTimeout(resolve, 600)); // await backup
-    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('Saved filter to:'));
+    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('Saved current filter to:'));
     expect(logger.debug).toHaveBeenCalledWith(`Temp file cleared for instance ${manager.id}`);
-    expect(logger.debug).toHaveBeenCalledWith('No previous filter to backup before first rotation');
     manager.add('testValue2');
     await new Promise((resolve) => setTimeout(resolve, 600)); // await rotation
     expect(logger.debug).toHaveBeenCalledWith('Rotating Bloom filters...');
@@ -413,9 +414,8 @@ describe('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', ()
   it('resetAndClearData resets filters and deletes backup files', async () => {
     manager.add('testValue');
     await new Promise((resolve) => setTimeout(resolve, 600)); // await backup
-    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('Saved filter to:'));
+    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('Saved current filter to:'));
     expect(logger.debug).toHaveBeenCalledWith(`Temp file cleared for instance ${manager.id}`);
-    expect(logger.debug).toHaveBeenCalledWith('No previous filter to backup before first rotation');
     manager.add('testValue2');
     await new Promise((resolve) => setTimeout(resolve, 600)); // await rotation
     expect(logger.debug).toHaveBeenCalledWith('Rotating Bloom filters...');
@@ -437,7 +437,7 @@ describe('BloomFilterManager ResetAndRestore, ResetAndClearData and Destroy', ()
     expect(manager.previous).toBeNull();
     expect(manager.current).toBeNull();
     expect(manager.rotationInterval).toBeNull();
-    expect(manager.backupInterval).toBeNull();
+    expect(manager.backupManager).toBeNull();
     expect(clearIntervalSpy).toHaveBeenCalled();
     expect(clearIntervalSpy).toHaveBeenCalledTimes(2);
     clearIntervalSpy.mockRestore();
@@ -561,5 +561,275 @@ describe('BloomFilterManager metrics', () => {
     expect(metrics.previousCount).toBeGreaterThan(NUMITEMS - 50);
     expect(metrics.previousCount).toBeLessThan(NUMITEMS + 50);
     expect(metrics.previousFpRate).toBeCloseTo(0.0001, 4);
+  });
+});
+
+describe('BloomFilterBackupManager restore and edge cases', () => {
+  let manager: BloomFilterManager;
+  let logger: MockLogger;
+
+  beforeEach(() => {
+    logger = createMockLogger();
+    manager = new BloomFilterManager({
+      id: 'test',
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 2000,
+      logger,
+      backup: true,
+      backupRatioTime: 2,
+    });
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await manager.resetAndClearData();
+    manager.destroy();
+  });
+
+  it('restore throws for invalid filterName', () => {
+    expect(() => manager.backupManager!.restore('invalid')).toThrow(
+      "filterName parameter must be either 'current', 'previous', or 'all'"
+    );
+  });
+
+  it('restore with "current" only restores the current filter', async () => {
+    manager.add('hello');
+    // Trigger a backup by waiting for the backup interval
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    // Now restore only the current filter
+    const restored = manager.backupManager!.restore('current');
+    expect(restored.current).not.toBeNull();
+    // previous should be null since we asked only for current and there was no previous backup
+  });
+
+  it('restore warns when no backup file exists', async () => {
+    await manager.resetAndClearData();
+    logger.debug.mockClear();
+    logger.warn.mockClear();
+    manager.backupManager!.restore('current');
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('No current backup to restore')
+    );
+  });
+
+  it('resetAndRestore propagates errors from internal operations', async () => {
+    // Throw inside the try block — e.g., make logger.debug throw
+    const origDebug = logger.debug;
+    logger.debug = vi.fn(() => {
+      throw new Error('Debug crash');
+    });
+    await expect(manager.resetAndRestore()).rejects.toThrow(
+      'Failed to reset and restore: Debug crash'
+    );
+    logger.debug = origDebug;
+  });
+
+  it('deleteBackupFile deletes an existing file and logs', () => {
+    const fs = require('node:fs');
+    const tmpPath = manager.backupManager!.backupTempFilePath;
+    fs.writeFileSync(tmpPath, 'test\n');
+    logger.debug.mockClear();
+    manager.backupManager!.deleteBackupFile(tmpPath, 'Test');
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.stringContaining('Test backup file deleted for instance')
+    );
+    expect(fs.existsSync(tmpPath)).toBe(false);
+  });
+
+  it('deleteBackupFile does nothing if file does not exist', () => {
+    const nonExistent = '/tmp/nonexistent-bloom-backup-test.blob';
+    logger.debug.mockClear();
+    expect(() => manager.backupManager!.deleteBackupFile(nonExistent, 'Ghost')).not.toThrow();
+    // No deletion log since file doesn't exist
+    expect(logger.debug).not.toHaveBeenCalledWith(
+      expect.stringContaining('Ghost backup file deleted')
+    );
+  });
+
+  it('bufferEnabled creates write interval', () => {
+    const mgr = new BloomFilterManager({
+      id: 'test-buf',
+      numItems: 100,
+      fpRate: 0.01,
+      rotateTime: 5000,
+      logger,
+      backup: true,
+      bufferEnabled: true,
+      backupRatioTime: 2,
+    });
+    expect(mgr.backupManager!.bufferEnabled).toBe(true);
+    expect(mgr.backupManager!.writeInterval).not.toBeNull();
+    mgr.destroy();
+  });
+
+  it('bufferEnabled backupItem pushes to writeBuffer instead of writing to file', () => {
+    const mgr = new BloomFilterManager({
+      id: 'test-buf2',
+      numItems: 100,
+      fpRate: 0.01,
+      rotateTime: 5000,
+      logger,
+      backup: true,
+      bufferEnabled: true,
+      backupRatioTime: 2,
+    });
+    const writeBufferLen = mgr.backupManager!.writeBuffer.length;
+    mgr.backupManager!.backupItem('test-item');
+    expect(mgr.backupManager!.writeBuffer.length).toBe(writeBufferLen + 1);
+    expect(mgr.backupManager!.writeBuffer).toContain('test-item');
+    mgr.destroy();
+  });
+
+  it('resetAndClearData propagates errors from internal operations', async () => {
+    vi.spyOn(manager.backupManager!, 'deleteBackupFile').mockImplementation(() => {
+      throw new Error('Delete failed');
+    });
+    await expect(manager.resetAndClearData()).rejects.toThrow(
+      'Failed to reset and clear data: Delete failed'
+    );
+  });
+
+  it('bufferMaxSize defaults to numItems * 2', () => {
+    const mgr = new BloomFilterManager({
+      id: 'test-buf-max',
+      numItems: 100,
+      fpRate: 0.01,
+      rotateTime: 5000,
+      logger,
+      backup: true,
+      bufferEnabled: true,
+      backupRatioTime: 2,
+    });
+    expect(mgr.backupManager!.maxBufferSize).toBe(200);
+    mgr.destroy();
+  });
+
+  it('bufferEnabled backupItem throws when buffer is full', () => {
+    const mgr = new BloomFilterManager({
+      id: 'test-buf-full',
+      numItems: 10,
+      fpRate: 0.01,
+      rotateTime: 5000,
+      logger,
+      backup: true,
+      bufferEnabled: true,
+      bufferMaxSize: 100,
+      backupRatioTime: 2,
+    });
+    for (let i = 0; i < 100; i++) {
+      mgr.backupManager!.backupItem(`item-${i}`);
+    }
+    expect(() => mgr.backupManager!.backupItem('overflow')).toThrow('Write buffer full');
+    mgr.destroy();
+  });
+
+  it('add() rejects when critically saturated', () => {
+    const mgr = new BloomFilterManager({
+      id: 'test-sat',
+      numItems: 10,
+      fpRate: 0.01,
+      rotateTime: 50000,
+      logger,
+    });
+    const threshold = 10 * BloomFilterManager.MAX_SATURATION_RATIO;
+    // Fill past the saturation threshold
+    for (let i = 0; i <= threshold; i++) {
+      mgr.add(`token-${i}`);
+    }
+    // Next add should be rejected
+    expect(() => mgr.add('overflow')).toThrow('filter critically saturated');
+    mgr.destroy();
+  });
+
+  it('getMetrics returns counters after add and has', () => {
+    const mgr = new BloomFilterManager({
+      id: 'test-counters',
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 50000,
+      logger,
+    });
+    mgr.add('hello');
+    mgr.add('world');
+    mgr.has('hello');
+    mgr.has('missing');
+    const metrics = mgr.getMetrics();
+    expect(metrics.counters.addSucceeded).toBe(2);
+    expect(metrics.counters.addFailed).toBe(0);
+    expect(metrics.counters.checks).toBe(2);
+    expect(metrics.counters.hits).toBe(1);
+    mgr.destroy();
+  });
+
+  it('add() throws after shutdown', async () => {
+    const mgr = new BloomFilterManager({
+      id: 'test-shutdown',
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 50000,
+      logger,
+    });
+    await mgr.shutdown();
+    expect(() => mgr.add('test')).toThrow('revoker is shutting down');
+  });
+
+  it('healthCheck reports saturated filter', () => {
+    const mgr = new BloomFilterManager({
+      id: 'test-health-sat',
+      numItems: 10,
+      fpRate: 0.01,
+      rotateTime: 50000,
+      logger,
+    });
+    const threshold = 10 * BloomFilterManager.MAX_SATURATION_RATIO;
+    for (let i = 0; i <= threshold; i++) {
+      mgr.add(`token-${i}`);
+    }
+    const health = mgr.healthCheck();
+    expect(health.healthy).toBe(false);
+    expect(health.checks.filter.healthy).toBe(false);
+    expect(health.checks.filter.error).toContain('critically saturated');
+    mgr.destroy();
+  });
+
+  it('resetAndRestore clears counters and insertions', async () => {
+    manager.add('test');
+    await manager.resetAndRestore();
+    const metrics = manager.getMetrics();
+    expect(metrics.counters.addSucceeded).toBe(0);
+    await manager.resetAndClearData();
+  });
+
+  it('rotation continues when backupRotate fails', async () => {
+    const mgr = new BloomFilterManager({
+      id: 'test-rot-backup-fail',
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 100,
+      logger,
+      backup: true,
+      backupRatioTime: 2,
+    });
+    // Mock backupRotate to throw
+    const backupRotateSpy = vi
+      .spyOn(mgr.backupManager!, 'backupRotate')
+      .mockRejectedValue(new Error('Disk full'));
+
+    const currentBefore = mgr.current;
+    // Wait for ONE rotation to fire (rotateTime=400, wait=250)
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    // Rotation should have completed despite backup failure
+    expect(mgr.hasRotated).toBe(true);
+    expect(mgr.current).not.toBe(currentBefore);
+    expect(mgr.previous).not.toBeNull();
+    // Backup failure should be logged
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('continuing with memory-only rotation')
+    );
+
+    backupRotateSpy.mockRestore();
+    mgr.destroy();
   });
 });

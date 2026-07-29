@@ -5,7 +5,7 @@ import { Mutex } from 'async-mutex';
 import { filterInputSchema } from './Inputs-validation.js';
 import { BloomFilterFactory } from './BloomFilterFactory.js';
 import { BloomFilterBackupManager } from './BloomFilterBackupManager.js';
-import type { GenericLogger } from './types.js';
+import type { GenericLogger, HealthStatus } from './types.js';
 
 /**
  * Configuration options for the Bloom filter manager.
@@ -27,6 +27,8 @@ export interface BloomFilterOptions {
   backupDir?: string;
   /** Whether to enable the buffer for backup writes. Defaults to false */
   bufferEnabled?: boolean;
+  /** Maximum number of tokens to hold in the write buffer before rejecting new additions. Defaults to numItems * 2. */
+  bufferMaxSize?: number;
   /** Any logger implementing the basic logging methods */
   logger: GenericLogger;
 }
@@ -60,6 +62,21 @@ export interface Metrics {
   estimatedMetrics: EstimatedMetrics;
   /** Configuration of the Bloom filter manager */
   configuration: Configuration;
+  /** Counters since startup (reset on resetAndClearData). */
+  counters: {
+    /** Successful add() calls. */
+    addSucceeded: number;
+    /** Failed add() calls. */
+    addFailed: number;
+    /** has() calls. */
+    checks: number;
+    /** has() calls that returned true (token found in filter). */
+    hits: number;
+    /** Completed rotations. */
+    rotations: number;
+    /** Failed rotation cycles (after all retries). */
+    rotationsFailed: number;
+  };
 }
 
 /**
@@ -78,6 +95,21 @@ export class BloomFilterManager {
   backupManager: BloomFilterBackupManager | null = null;
   hasRotated: boolean;
   mutex: Mutex;
+  /** Counter of insertions into the current filter since last rotation. */
+  #currentInsertions = 0;
+  /** Maximum ratio of insertions / numItems before add() refuses new tokens. */
+  static readonly MAX_SATURATION_RATIO = 10;
+  /** Whether the manager is shutting down — add() will be rejected. */
+  #shuttingDown = false;
+  /** Counters for metrics. */
+  #counters = {
+    addSucceeded: 0,
+    addFailed: 0,
+    checks: 0,
+    hits: 0,
+    rotations: 0,
+    rotationsFailed: 0,
+  };
 
   /**
    * Creates an instance of BloomFilterManager.
@@ -125,9 +157,6 @@ export class BloomFilterManager {
     this.#startRotationInterval();
   }
 
-  // Note: not testing private methods
-  /* c8 ignore start */
-
   /**
    * Initializes the backup manager and restores the filters from the backup if it exists.
    */
@@ -173,6 +202,7 @@ export class BloomFilterManager {
     for (let i = 0; i < maxRetries; i++) {
       try {
         await this.#rotate();
+        this.#counters.rotations++;
         return;
       } catch (error) {
         this.logger.error(`Rotation failed (attempt ${i + 1}/${maxRetries}):`, error);
@@ -181,11 +211,11 @@ export class BloomFilterManager {
         }
       }
     }
-    this.logger.error('Max retries reached. Stopping rotation.');
-    if (this.rotationInterval) {
-      clearInterval(this.rotationInterval);
-      this.rotationInterval = null;
-    }
+    // Never stop the interval — the next tick will retry naturally.
+    this.#counters.rotationsFailed++;
+    this.logger.error(
+      `Max retries reached for this rotation cycle. Will retry on next interval in ${this.rotateTime}ms.`
+    );
   }
 
   /**
@@ -199,11 +229,25 @@ export class BloomFilterManager {
         this.hasRotated = true;
       }
       this.logger.debug('Rotating Bloom filters...');
+
+      // Try to persist current filter, but do not abort rotation on failure.
+      // Memory rotation continues so that expired tokens are evicted and the
+      // false-positive rate stays under control. The health check will report
+      // storage as unhealthy.
       if (this.backupManager && this.current) {
-        await this.backupManager.backupRotate(this.current);
+        try {
+          await this.backupManager.backupRotate(this.current);
+        } catch (backupError) {
+          this.logger.error(
+            `Backup during rotation failed, continuing with memory-only rotation: ${(backupError as Error).message}`
+          );
+        }
       }
+
       this.previous = this.current;
       this.current = BloomFilterFactory.create(this.numItems, this.fpRate);
+      this.#currentInsertions = 0;
+
       // reinitialize the backup interval with the new filter if needed
       if (this.backupManager?.backupRatioTime) {
         this.backupManager.stopBackupInterval();
@@ -216,8 +260,6 @@ export class BloomFilterManager {
       release();
     }
   }
-
-  /* c8 ignore stop */
 
   /**
    * Adds a value to the current Bloom filter and synchronously appends it to the temporary backup file.
@@ -243,13 +285,33 @@ export class BloomFilterManager {
     if (typeof filterItem !== 'string' || filterItem.trim() === '') {
       throw new ValidationError('Value must be a non-empty string');
     }
+
+    if (this.#shuttingDown) {
+      throw new InternalError('Cannot add token: revoker is shutting down.');
+    }
+
+    // Reject additions when the filter is critically saturated — adding more
+    // tokens to an already-saturated filter only deepens the false-positive
+    // problem without providing meaningful revocation guarantees.
+    if (this.#currentInsertions > this.numItems * BloomFilterManager.MAX_SATURATION_RATIO) {
+      this.#counters.addFailed++;
+      throw new InternalError(
+        `Cannot add token: filter critically saturated ` +
+          `(${this.#currentInsertions} insertions, ${this.numItems} capacity). ` +
+          `Token NOT revoked. Check health endpoint.`
+      );
+    }
+
     try {
       this.backupManager?.backupItem(filterItem);
       this.current?.add(filterItem);
     } catch (error) {
+      this.#counters.addFailed++;
       const err = error as Error;
       throw new InternalError(`Failed to add value to Bloom filter: ${err.message}`);
     }
+    this.#currentInsertions++;
+    this.#counters.addSucceeded++;
   }
 
   /**
@@ -263,10 +325,14 @@ export class BloomFilterManager {
       throw new ValidationError('Value must be a non-empty string');
     }
 
-    return (
+    this.#counters.checks++;
+    const result =
       (this.current ? this.current.test(value) : false) ||
-      (this.previous ? this.previous.test(value) : false)
-    );
+      (this.previous ? this.previous.test(value) : false);
+    if (result) {
+      this.#counters.hits++;
+    }
+    return result;
   }
 
   /**
@@ -310,7 +376,56 @@ export class BloomFilterManager {
       backupEnabled: !!this.backupManager,
       backupRatioTime: this.backupManager?.backupRatioTime ?? 0,
     };
-    return { estimatedMetrics, configuration };
+    return { estimatedMetrics, configuration, counters: { ...this.#counters } };
+  }
+
+  /**
+   * Checks the health of the Bloom filter system.
+   *
+   * Verifies three components:
+   * - **storage**: whether the backup directory is writable (skipped when backup is disabled).
+   * - **filter**: whether the current bloom filter is initialized.
+   * - **rotation**: whether the rotation interval is running.
+   *
+   * @returns A structured health status object.
+   */
+  healthCheck(): HealthStatus {
+    const insertionRatio = this.#currentInsertions / this.numItems;
+
+    let filterStatus: HealthStatus['checks']['filter'];
+    if (!this.current) {
+      filterStatus = { healthy: false, error: 'Current filter is null' };
+    } else if (insertionRatio > BloomFilterManager.MAX_SATURATION_RATIO) {
+      filterStatus = {
+        healthy: false,
+        error:
+          `Filter critically saturated: ${this.#currentInsertions} insertions ` +
+          `(${insertionRatio.toFixed(1)}x capacity). ` +
+          `FPR severely degraded, add() is blocked.`,
+      };
+    } else if (insertionRatio > 2) {
+      filterStatus = {
+        healthy: true,
+        error:
+          `Filter moderately saturated: ${this.#currentInsertions} insertions ` +
+          `(${insertionRatio.toFixed(1)}x capacity). ` +
+          `FPR may be elevated — rotation may be failing.`,
+      };
+    } else {
+      filterStatus = { healthy: true };
+    }
+
+    const checks: HealthStatus['checks'] = {
+      storage: this.backupManager ? this.backupManager.healthCheckStorage() : { healthy: true },
+      filter: filterStatus,
+      rotation:
+        this.rotationInterval === null
+          ? { healthy: false, error: 'Rotation interval is not running' }
+          : { healthy: true },
+    };
+
+    const healthy = Object.values(checks).every((c) => c.healthy);
+    return { healthy, checks };
   }
 
   /**
@@ -323,6 +438,15 @@ export class BloomFilterManager {
       this.#stopRotationInterval();
       this.previous = null;
       this.current = BloomFilterFactory.create(this.numItems, this.fpRate);
+      this.#currentInsertions = 0;
+      this.#counters = {
+        addSucceeded: 0,
+        addFailed: 0,
+        checks: 0,
+        hits: 0,
+        rotations: 0,
+        rotationsFailed: 0,
+      };
       this.#startRotationInterval();
       this.logger.debug('Bloom filters reset');
       if (this.backupManager) {
@@ -352,6 +476,7 @@ export class BloomFilterManager {
         this.backupManager.deleteBackupFile(this.backupManager.backupTempFilePath, 'Temporary');
       }
       this.hasRotated = false;
+      this.#currentInsertions = 0;
       await this.resetAndRestore(); // Reuse resetAndRestore
     } catch (error) {
       const err = error as Error;
@@ -360,12 +485,37 @@ export class BloomFilterManager {
   }
 
   /**
+   * Gracefully shuts down the Bloom filter manager.
+   *
+   * 1. Marks the instance as shutting down so new add() calls are rejected.
+   * 2. Waits for any in-progress rotation to complete.
+   * 3. Flushes the write buffer one last time (if buffer is enabled).
+   * 4. Destroys all resources.
+   */
+  async shutdown(): Promise<void> {
+    this.logger.info(`Shutting down BloomFilterManager ${this.id}...`);
+    this.#shuttingDown = true;
+
+    // Wait for in-progress rotation to complete
+    const release = await this.mutex.acquire();
+    release();
+
+    // Flush buffer one last time
+    if (this.backupManager?.bufferEnabled) {
+      await this.backupManager.flushWriteBuffer();
+    }
+
+    this.destroy();
+    this.logger.info(`BloomFilterManager ${this.id} shut down.`);
+  }
+
+  /**
    * Cleans up resources when the instance is destroyed.
    */
   destroy(): void {
     this.#stopRotationInterval();
     this.backupManager?.stopBackupInterval();
-    this.backupManager?.stoptWriteInterval();
+    this.backupManager?.stopWriteInterval();
     this.backupManager = null;
     this.previous = null;
     this.current = null;

@@ -5,7 +5,7 @@ import throttle from 'throttleit';
 import { stopServer, startServer } from './grpc/std-server.js';
 import { revokerInputSchema } from './Inputs-validation.js';
 import RevokerStore from './revokerStore.js';
-import type { GenericLogger, RevokerStore as RevokerStoreType } from './types.js';
+import type { GenericLogger, HealthStatus, RevokerStore as RevokerStoreType } from './types.js';
 import type { RequestHandler } from 'express';
 
 /**
@@ -155,7 +155,10 @@ export class Revoker {
    */
   async _grpcInit(): Promise<Revoker> {
     if (this.grpcEnabled && this.grpcPort) {
-      if (!Revoker.grpcServerStarted) {
+      if (Revoker.grpcServerStarted) {
+        this.logger.info('gRPC server is already started.');
+        this.revokerStore.registerInstance(this);
+      } else {
         this.logger.info(`Starting gRPC server with id: ${this.id}`);
         try {
           this.revokerStore.init();
@@ -167,9 +170,6 @@ export class Revoker {
           this.logger.error(`Failed to start gRPC server: ${error.message}`); // double log ???
           throw new Error(`Failed to start gRPC server: ${error.message}`);
         }
-      } else {
-        this.logger.info('gRPC server is already started.');
-        this.revokerStore.registerInstance(this);
       }
     }
     return this;
@@ -250,6 +250,24 @@ export class Revoker {
   }
 
   /**
+   * Checks the health of the Bloom filter system.
+   *
+   * @returns A structured health status object.
+   * @throws {Error} If the Bloom filter manager is not initialized.
+   */
+  healthCheck(): HealthStatus {
+    if (this.grpcEnabled) {
+      throw new Error('gRPC is enabled, use the gRPC method instead');
+    }
+
+    if (!this.bloomFilterManager) {
+      throw new Error('Bloom filter manager not initialized');
+    }
+
+    return this.bloomFilterManager.healthCheck();
+  }
+
+  /**
    * Resets and restore the Bloom filter.
    * @throws {Error} If an error occurs during the reset or restoration.
    */
@@ -291,6 +309,23 @@ export class Revoker {
       this.logger.error('Error in revoker.resetAndClearData:', error);
       throw error;
     }
+  }
+
+  /**
+   * Gracefully shuts down the revoker.
+   *
+   * Rejects new add() calls, waits for in-progress operations, flushes the
+   * write buffer if enabled, and destroys all resources.
+   * Safe to call from a SIGTERM/SIGINT handler.
+   */
+  async shutdown(): Promise<void> {
+    if (!this.bloomFilterManager) {
+      this.logger.warn('Bloom filter manager already destroyed, nothing to shut down.');
+      return;
+    }
+    await this.bloomFilterManager.shutdown();
+    this.middleware = null;
+    this.bloomFilterManager = null;
   }
 
   /**

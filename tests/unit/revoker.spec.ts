@@ -3,10 +3,6 @@ import { Revoker } from '../../dist/index.js';
 import { BloomFilterManager } from '../../dist/Bloom-filter-manager.js';
 import RevokerStore from '../../dist/revokerStore.js';
 import { createMockLogger, type MockLogger } from '../helpers/mock-logger.js';
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-import e from 'express';
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-import fs from 'fs';
 
 describe('Revoker Constructor Validation Tests', () => {
   let logger: MockLogger;
@@ -112,9 +108,10 @@ describe('Revoker Constructor Validation Tests', () => {
         new Revoker({
           id: 'test',
           claimsToCheck: 'claim1' as any,
+          payloadKey: 'token',
           logger,
           filter: { numItems: 1000, fpRate: 0.01, rotateTime: 2000 },
-        })
+        } as any)
     ).toThrow('Invalid input: "claimsToCheck" must be an array');
   });
 
@@ -124,6 +121,7 @@ describe('Revoker Constructor Validation Tests', () => {
         new Revoker({
           id: 'test',
           claimsToCheck: [],
+          payloadKey: 'token',
           logger,
           filter: { numItems: 1000, fpRate: 0.01, rotateTime: 2000 },
         } as any)
@@ -136,6 +134,7 @@ describe('Revoker Constructor Validation Tests', () => {
         new Revoker({
           id: 'test',
           claimsToCheck: ['claim1', 123 as any],
+          payloadKey: 'token',
           logger,
           filter: { numItems: 1000, fpRate: 0.01, rotateTime: 2000 },
         })
@@ -317,7 +316,7 @@ describe('Revoker Constructor Validation Tests', () => {
           logger,
           filter: { numItems: 1000, fpRate: 0.01, rotateTime: 2000 },
           grpcEnabled: true,
-          grpcPort: '50051' as any,
+          grpcPort: 50051,
         })
     ).not.toThrow();
   });
@@ -341,8 +340,8 @@ describe('Revoker Constructor Validation Tests', () => {
     expect(revoker.bloomFilterManager!.numItems).toBe(1000);
     expect(revoker.bloomFilterManager!.fpRate).toBe(0.01);
     expect(revoker.bloomFilterManager!.rotateTime).toBe(2000);
-    expect((revoker.bloomFilterManager as any).backupEnabled).toBe(true);
-    expect((revoker.bloomFilterManager as any).backupRatioTime).toBe(2);
+    expect(revoker.bloomFilterManager?.backupManager).toBeTruthy();
+    expect(revoker.bloomFilterManager?.backupManager?.backupRatioTime).toBe(2);
     await revoker.destroy();
   });
 });
@@ -487,7 +486,9 @@ describe('Revoker Class Tests', () => {
       revokerStore as any
     );
 
-    await expect(revoker._grpcInit()).rejects.toThrow('Failed to start gRPC server: Start server failed');
+    await expect(revoker._grpcInit()).rejects.toThrow(
+      'Failed to start gRPC server: Start server failed'
+    );
     expect(logger.error).toHaveBeenCalledOnce();
     expect(logger.error.mock.calls[0][0]).toBe('Failed to start gRPC server: Start server failed');
     await revoker.destroy();
@@ -525,7 +526,9 @@ describe('Revoker Class Tests', () => {
       'Failed to start gRPC server: Register instance failed'
     );
     expect(logger.error).toHaveBeenCalledOnce();
-    expect(logger.error.mock.calls[0][0]).toBe('Failed to start gRPC server: Register instance failed');
+    expect(logger.error.mock.calls[0][0]).toBe(
+      'Failed to start gRPC server: Register instance failed'
+    );
     await revoker.destroy();
   });
 
@@ -718,7 +721,9 @@ describe('Revoker Class Tests', () => {
     await revoker.resetAndRestore();
     expect(resetAndRestoreStub).toHaveBeenCalledOnce();
     expect(logger.info).toHaveBeenCalledOnce();
-    expect(logger.info).toHaveBeenCalledWith('Bloom filter has been reset and restored successfully.');
+    expect(logger.info).toHaveBeenCalledWith(
+      'Bloom filter has been reset and restored successfully.'
+    );
     await revoker.destroy();
   });
 
@@ -828,7 +833,9 @@ describe('Revoker Class Tests', () => {
     await revoker.resetAndClearData();
     expect(resetAndClearDataStub).toHaveBeenCalledOnce();
     expect(logger.info).toHaveBeenCalledOnce();
-    expect(logger.info).toHaveBeenCalledWith('Bloom filter has been reset and data cleared successfully.');
+    expect(logger.info).toHaveBeenCalledWith(
+      'Bloom filter has been reset and data cleared successfully.'
+    );
     await revoker.destroy();
   });
 

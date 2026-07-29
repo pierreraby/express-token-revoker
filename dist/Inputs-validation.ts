@@ -77,6 +77,15 @@ const filterInputSchema = Joi.object({
     .when('backup', { not: Joi.exist(), then: Joi.forbidden() })
     .when('backup', { is: false, then: Joi.forbidden() })
     .description('Enable buffer for items added tothe filter'),
+  bufferMaxSize: Joi.number()
+    .positive()
+    .integer()
+    .min(100)
+    .when('bufferEnabled', { not: Joi.exist(), then: Joi.forbidden() })
+    .when('bufferEnabled', { is: false, then: Joi.forbidden() })
+    .description(
+      'Maximum number of tokens to hold in the write buffer before rejecting new additions'
+    ),
 });
 
 export { revokerInputSchema, filterInputSchema };

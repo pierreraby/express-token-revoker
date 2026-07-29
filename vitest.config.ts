@@ -11,7 +11,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'text-summary', 'html'],
-      all: true,
+      reportOnFailure: true,
       include: ['dist/**/*.ts'],
       exclude: [
         'dist/grpc/std-client.ts',

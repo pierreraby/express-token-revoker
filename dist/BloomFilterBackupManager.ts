@@ -6,7 +6,7 @@ import { InternalError, ValidationError } from './errors.js';
 import { Mutex } from 'async-mutex';
 import { BloomFilterFactory } from './BloomFilterFactory.js';
 import type { BloomFilter } from './bloomfilter.js';
-import type { GenericLogger } from './types.js';
+import type { GenericLogger, HealthCheckComponent } from './types.js';
 import type { BloomFilterOptions } from './Bloom-filter-manager.js';
 
 // Define __filename and __dirname
@@ -45,6 +45,8 @@ export class BloomFilterBackupManager {
   backupTempFilePath: string;
   bufferEnabled: boolean;
   writeBuffer: string[];
+  /** Maximum number of tokens to hold in the write buffer before rejecting new additions. */
+  maxBufferSize: number;
   writeInterval: NodeJS.Timeout | null;
   bufferFlushInterval: number;
   mutex: Mutex;
@@ -73,6 +75,7 @@ export class BloomFilterBackupManager {
 
     this.bufferEnabled = options.bufferEnabled ?? false;
     this.writeBuffer = [];
+    this.maxBufferSize = options.bufferMaxSize ?? Math.max(filterParams.numItems * 2, 100);
     this.writeInterval = null;
     this.bufferFlushInterval = 1000;
 
@@ -96,11 +99,11 @@ export class BloomFilterBackupManager {
    */
   #ensureBackupDirExists(): void {
     try {
-      if (!fs.existsSync(this.backupDir)) {
+      if (fs.existsSync(this.backupDir)) {
+        this.logger.debug('Backup directory already exists.');
+      } else {
         fs.mkdirSync(this.backupDir, { recursive: true });
         this.logger.debug('Backup directory created');
-      } else {
-        this.logger.debug('Backup directory already exists.');
       }
     } catch (error) {
       throw new InternalError(`Error accessing or creating backup directory: ${error.message}`);
@@ -114,7 +117,7 @@ export class BloomFilterBackupManager {
   backupExists(): boolean {
     try {
       return fs.existsSync(this.backupDir) && fs.readdirSync(this.backupDir).length > 0;
-    } catch (error) {
+    } catch {
       return false; // Consider that the backup does not exist in case of an error
     }
   }
@@ -140,11 +143,10 @@ export class BloomFilterBackupManager {
         }
       }
     }
-    this.logger.error('Max retries reached. Stopping backup.');
-    if (this.backupInterval) {
-      clearInterval(this.backupInterval);
-      this.backupInterval = null;
-    }
+    // Never stop the interval — the next tick will retry naturally.
+    // The backup is restarted on every rotation anyway, so a permanent
+    // stop here would be silently recovered later.
+    this.logger.error(`Max retries reached for this backup cycle. Will retry on next interval.`);
   }
 
   /**
@@ -177,47 +179,105 @@ export class BloomFilterBackupManager {
   /**
    * Stops the Bloom filter rotation interval.
    */
-  stoptWriteInterval(): void {
+  stopWriteInterval(): void {
     if (this.writeInterval !== null) {
       clearInterval(this.writeInterval);
       this.writeInterval = null;
-      this.logger.debug(`Rotation stopped for id: ${this.id}`);
+      this.logger.debug(`Write interval stopped for id: ${this.id}`);
     }
   }
 
   /**
-   * Backup the filter
+   * Backup a single token to the temporary file (synchronous for crash safety).
+   *
+   * Retries up to 3 times on failure before letting the error propagate.
+   * No delay between retries to preserve the synchronous crash-safety model:
+   * the entire `add()` call must complete before the process can yield.
+   *
+   * When `bufferEnabled` is true, the token is pushed to an in-memory buffer
+   * and flushed asynchronously — see `#flushWriteBuffer()`.
+   *
    * @param filterItem - The value to add.
    */
   backupItem(filterItem: string): void {
     if (this.bufferEnabled) {
+      if (this.writeBuffer.length >= this.maxBufferSize) {
+        throw new InternalError(
+          `Write buffer full (${this.maxBufferSize} items). ` +
+            `Disk may be unavailable — tokens are not being persisted. ` +
+            `Token NOT added to buffer.`
+        );
+      }
       this.writeBuffer.push(filterItem);
-      // if (this.writeBuffer.length >= MAX_BUFFER_SIZE) {
-      //   this.#flushWriteBuffer();
-      // }
-    } else {
-      fs.appendFileSync(this.backupTempFilePath, `${filterItem}\n`);
+      return;
+    }
+
+    const maxRetries = 3;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        fs.appendFileSync(this.backupTempFilePath, `${filterItem}\n`);
+        return;
+      } catch (error) {
+        const err = error as Error;
+        if (attempt < maxRetries - 1) {
+          this.logger.warn(
+            `Temp file write failed (attempt ${attempt + 1}/${maxRetries}): ${err.message}`
+          );
+        } else {
+          this.#writeAuditLog(`FAILED_TO_PERSIST: ${filterItem}`, err);
+          throw error;
+        }
+      }
     }
   }
 
   /**
+   * Public wrapper around the private flush for use during graceful shutdown.
+   */
+  async flushWriteBuffer(): Promise<void> {
+    await this.#flushWriteBuffer();
+  }
+
+  /**
+   * Last-resort audit trail: writes to stderr so that a token is never
+   * completely invisible, even when all file I/O has failed.
+   *
+   * This is NOT a substitute for proper persistence — tokens written here
+   * are lost on restart. It exists so that an operator can reconstruct
+   * revocations manually from the process logs.
+   */
+  #writeAuditLog(token: string, error: Error): void {
+    const ts = new Date().toISOString();
+    process.stderr.write(
+      `[TOKEN-REVOKER:${this.id}] ${ts} | ${token} | reason: ${error.message}\n`
+    );
+  }
+
+  /**
    * Flushes the write buffer to the temp file.
-   * @throws {InternalError} If an error occurs while writing to the temp file.
+   *
+   * The buffer is cleared ONLY after a successful write, so a failure does not
+   * lose data — tokens stay in the buffer and will be retried on the next flush
+   * interval.
    */
   async #flushWriteBuffer(): Promise<void> {
     if (this.writeBuffer.length === 0) {
       return;
     }
-    const data = this.writeBuffer.join('\n') + '\n';
-    this.writeBuffer = []; // Vider le buffer AVANT l'écriture
+    const data = `${this.writeBuffer.join('\n')}\n`;
     try {
       await fs.promises.appendFile(this.backupTempFilePath, data);
+      this.writeBuffer = [];
       this.logger.debug(`Buffer flushed for instance ${this.id}`);
     } catch (error) {
-      this.logger.error('Error writing to temp file:', error);
-      // Handle the error (e.g., retry later, or stop the backup)
-      // IMPORTANT: If the write fails, the data is *lost*.
-      // You might consider putting it back into the buffer, but be cautious of infinite loops.
+      const err = error as Error;
+      this.logger.error(
+        `Error writing to temp file (buffer NOT cleared, will retry): ${err.message}`
+      );
+      // Last-resort audit: write every buffered token to stderr
+      for (const item of this.writeBuffer) {
+        this.#writeAuditLog(`BUFFER_FLUSH_FAILED: ${item}`, err);
+      }
     }
   }
 
@@ -230,7 +290,7 @@ export class BloomFilterBackupManager {
       return (
         fs.existsSync(this.backupTempFilePath) && fs.statSync(this.backupTempFilePath).size > 0
       );
-    } catch (error) {
+    } catch {
       return false; // Consider that the file does not exist or is empty in case of error
     }
   }
@@ -282,7 +342,7 @@ export class BloomFilterBackupManager {
     try {
       await this.backupLocal(filter);
       if (fs.existsSync(this.backupCurrentPath)) {
-        fs.renameSync(this.backupCurrentPath, this.backupPreviousPath); // Vous pourriez envisager de gérer les erreurs ici également
+        fs.renameSync(this.backupCurrentPath, this.backupPreviousPath);
       }
     } catch (error) {
       throw error;
@@ -291,34 +351,40 @@ export class BloomFilterBackupManager {
 
   /**
    * Restores elements from the temporary file to the current filter.
-   * @param currentFilter - The current filter instance.
-   * @throws {InternalError} If an error occurs while restoring the filter.
+   *
+   * Malformed or unparsable tokens are skipped with a warning so that a single
+   * corrupted line does not prevent the rest of the restore from completing.
+   *
+   * @param currentFilter - The current filter instance (guaranteed non-null by caller).
+   * @throws {InternalError} If the temp file cannot be read at all (I/O error).
    */
   #restoreTemp(currentFilter: BloomFilter): void {
     try {
       const fileContent = fs.readFileSync(this.backupTempFilePath, 'utf8');
       const lines = fileContent.split('\n');
+      let skippedCount = 0;
 
       for (const line of lines) {
         if (line.trim()) {
           try {
-            if (currentFilter) {
-              currentFilter.add(line);
-            } else {
-              // This situation should not occur as `current` is initialized
-              throw new InternalError(
-                `Cannot add '${line}' to current filter: filter not initialized.`
-              );
-            }
+            currentFilter.add(line);
           } catch (error) {
-            throw new InternalError(`Failed to add '${line}' to Bloom filter: ${error.message}`);
+            skippedCount++;
+            this.logger.warn(
+              `Skipping malformed token during restore: '${line.slice(0, 50)}': ${(error as Error).message}`
+            );
           }
         }
       }
 
+      if (skippedCount > 0) {
+        this.logger.warn(
+          `Skipped ${skippedCount} malformed token(s) during restore for instance ${this.id}`
+        );
+      }
       this.logger.debug(`Elements restored from temp file for instance : ${this.id}`);
     } catch (error) {
-      throw new InternalError(`Restore temp file failed: ${error.message}`);
+      throw new InternalError(`Restore temp file failed: ${(error as Error).message}`);
     }
   }
 
@@ -390,6 +456,27 @@ export class BloomFilterBackupManager {
   }
 
   /**
+   * Checks whether the storage backend is healthy by writing and deleting a
+   * test file in the backup directory.
+   *
+   * @returns A health check component result.
+   */
+  healthCheckStorage(): HealthCheckComponent {
+    try {
+      this.#ensureBackupDirExists();
+      const testFile = path.join(this.backupDir, '.health-check');
+      fs.writeFileSync(testFile, `${Date.now()}\n`);
+      fs.unlinkSync(testFile);
+      return { healthy: true };
+    } catch (error) {
+      return {
+        healthy: false,
+        error: `Storage check failed: ${(error as Error).message}`,
+      };
+    }
+  }
+
+  /**
    * Deletes a backup file if it exists.
    * @param filePath The path to the backup file.
    * @param fileType The type of backup file (e.g., 'Current', 'Previous').
@@ -405,15 +492,4 @@ export class BloomFilterBackupManager {
       throw new InternalError(`Error deleting ${fileType} backup file: ${error.message}`);
     }
   }
-
-  // ... (Toutes les méthodes liées à la sauvegarde et à la restauration) ...
-  // #backup, #backupLocal, #restore, #restoreTemp, #deleteBackupFile,
-  // #ensureBackupDirExists, #tempFileExistsAndNotEmpty, #flushWriteBuffer (pour l'écriture bufferisée)
-
-  //async #flushWriteBuffer() { /* ... */ } // Implémentation de l'écriture asynchrone par lots
-  //startBackupInterval() { /* ... */ } // Méthode pour démarrer l'intervalle de backup
-  //stopBackup() { /* ... */ } // Méthode pour arrêter l'intervalle de backup
-  async appendToTempFile(data: string): Promise<void> {
-    /* ... */
-  } // Méthode pour ajouter des données au buffer
 }
