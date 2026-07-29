@@ -598,14 +598,12 @@ describe('Revoker Class Tests', () => {
 
   it('concurrent _grpcInit calls share a single server initialization', async () => {
     let resolveBind: (() => void) | undefined;
-    const startServerSpy = vi
-      .fn()
-      .mockImplementation(
-        () =>
-          new Promise<void>((resolve) => {
-            resolveBind = resolve;
-          })
-      );
+    const startServerSpy = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveBind = resolve;
+        })
+    );
     const stopServerSpy = vi.fn();
 
     const revokerStore = {

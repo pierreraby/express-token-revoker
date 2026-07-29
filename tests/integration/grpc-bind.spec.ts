@@ -42,7 +42,9 @@ describe('gRPC bind safety', () => {
   });
 
   it('refuses to bind a non-loopback host without TLS', async () => {
-    await expect(createRevoker(baseConfig(BIND_TEST_PORT, { grpcHost: '0.0.0.0' }))).rejects.toThrow(
+    await expect(
+      createRevoker(baseConfig(BIND_TEST_PORT, { grpcHost: '0.0.0.0' }))
+    ).rejects.toThrow(
       'Refusing to bind the unauthenticated gRPC admin service to non-loopback host'
     );
   });

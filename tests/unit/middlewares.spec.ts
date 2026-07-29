@@ -42,13 +42,7 @@ describe('Middleware Tests', () => {
   it('JWT Middleware - if in development mode, logger is called', () => {
     process.env.NODE_ENV = 'development';
 
-    const middleware = createJWTMiddleware(
-      ['claim1'],
-      'token',
-      manager,
-      logger,
-      throttleLog
-    );
+    const middleware = createJWTMiddleware(['claim1'], 'token', manager, logger, throttleLog);
     const req = {
       token: {
         claim: 'value',

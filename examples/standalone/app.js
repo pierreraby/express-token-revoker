@@ -1,13 +1,19 @@
-// @ts-check 
+// @ts-check
 import express from 'express';
 import logger from '../logger.js';
 import { ValidationError, InternalError } from '#build/errors.js';
 import { auth, admin } from './middlewares/auth.js';
-import {JWTrevoker, JWTfilter, opaqueRevoker, opaqueFilter,
-        opaqueRevokerCustom, opaqueFilterCustom} from './middlewares/revoker.js';
+import {
+  JWTrevoker,
+  JWTfilter,
+  opaqueRevoker,
+  opaqueFilter,
+  opaqueRevokerCustom,
+  opaqueFilterCustom,
+} from './middlewares/revoker.js';
 
 const app = express();
-const port = process.env.PORT || 3000;;
+const port = process.env.PORT || 3000;
 
 app.use(express.json());
 
@@ -29,8 +35,8 @@ app.post('/revoke/:claim/:value', admin, JWTfilter, async (req, res) => {
     const filterItem = `${claim}-${value}`;
     JWTrevoker.add(filterItem);
     res.status(200).json({ message: 'Token revoked' });
-  } catch(error) {
-    res.status(500).json({ message: `Error: ${ error.message }` });
+  } catch (error) {
+    res.status(500).json({ message: `Error: ${error.message}` });
   }
 });
 
@@ -45,8 +51,8 @@ app.post('/revoke2/:token', admin, JWTfilter, async (req, res) => {
   try {
     opaqueRevoker.add(token);
     res.status(200).json({ message: 'Token revoked' });
-  } catch(error) {
-    res.status(500).json({ message: `Error: ${ error.message }` });
+  } catch (error) {
+    res.status(500).json({ message: `Error: ${error.message}` });
   }
 });
 
@@ -61,8 +67,8 @@ app.post('/revoke3/:token', admin, JWTfilter, (req, res) => {
   try {
     opaqueRevokerCustom.add(token);
     res.status(200).json({ message: 'Token revoked' });
-  } catch(error) {
-    res.status(500).json({ message: `Error: ${ error.message }` });
+  } catch (error) {
+    res.status(500).json({ message: `Error: ${error.message}` });
   }
 });
 
@@ -73,8 +79,8 @@ app.post('/restore', admin, async (req, res) => {
     await opaqueRevoker.resetAndRestore();
     await opaqueRevokerCustom.resetAndRestore();
     res.status(200).json({ message: 'Bloom filters restored' });
-  } catch(error) {
-    res.status(500).json({ message: `Error: ${ error.message }` });
+  } catch (error) {
+    res.status(500).json({ message: `Error: ${error.message}` });
   }
 });
 
@@ -85,18 +91,18 @@ app.post('/reset', admin, async (req, res) => {
     await opaqueRevoker.resetAndClearData();
     await opaqueRevokerCustom.resetAndClearData();
     res.status(200).json({ message: 'Bloom filters reset' });
-  } catch(error) {
-    res.status(500).json({ message: `Error: ${ error.message }` });
+  } catch (error) {
+    res.status(500).json({ message: `Error: ${error.message}` });
   }
 });
 
 // Endpoint to expose JWTrevoker metrics
 app.get('/metrics', (req, res) => {
   try {
-    const metrics  =  JWTrevoker.getMetrics();
+    const metrics = JWTrevoker.getMetrics();
     res.status(200).json(metrics);
-  } catch(error) {
-    res.status(500).json({ message: `Error: ${ error.message }` });
+  } catch (error) {
+    res.status(500).json({ message: `Error: ${error.message}` });
   }
 });
 
@@ -112,18 +118,18 @@ app.use((err, req, res, next) => {
     // Erreurs internes
     res.status(500).json({
       error: err.name,
-      message: err.message || "An unexpected internal error occurred",
+      message: err.message || 'An unexpected internal error occurred',
     });
   } else {
     // Autres erreurs non spécifiées
     res.status(500).json({
-      error: "internal_error",
-      message: "An unexpected error occurred",
+      error: 'internal_error',
+      message: 'An unexpected error occurred',
     });
   }
 });
 
-process.on("SIGINT", async () => {
+process.on('SIGINT', async () => {
   await JWTrevoker.destroy();
   await opaqueRevoker.destroy();
   await opaqueRevokerCustom.destroy();
@@ -135,5 +141,3 @@ process.on("SIGINT", async () => {
 app.listen(port, () => {
   console.log(`API-server HTTP running on port ${port}`);
 });
-
-

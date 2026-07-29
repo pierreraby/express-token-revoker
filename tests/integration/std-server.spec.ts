@@ -6,7 +6,12 @@ const TEST_PORT = 50052;
 const SERVER_ADDRESS = `127.0.0.1:${TEST_PORT}`;
 
 describe('gRPC Server Integration Tests', () => {
-  let logger: { info: (...args: any[]) => void; error: (...args: any[]) => void; warn: (...args: any[]) => void; debug: (...args: any[]) => void };
+  let logger: {
+    info: (...args: any[]) => void;
+    error: (...args: any[]) => void;
+    warn: (...args: any[]) => void;
+    debug: (...args: any[]) => void;
+  };
   let jwtRevoker: any;
   let opaqueRevoker: any;
   let client: any;
@@ -138,8 +143,8 @@ describe('gRPC Server Integration Tests', () => {
       'item must not contain'
     );
     // Oversized item (hard cap against CPU/hash DoS)
-    await expect(
-      client.add({ revokerId: 'JWTrevoker', item: 'x'.repeat(5000) })
-    ).rejects.toThrow('item must not exceed 4096 characters');
+    await expect(client.add({ revokerId: 'JWTrevoker', item: 'x'.repeat(5000) })).rejects.toThrow(
+      'item must not exceed 4096 characters'
+    );
   });
 });

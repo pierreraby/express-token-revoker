@@ -558,7 +558,9 @@ export class BloomFilterBackupManager {
         this.logger.debug(`${fileType} backup file deleted for instance : id ${this.id}`);
       }
     } catch (error) {
-      throw new InternalError(`Error deleting ${fileType} backup file: ${(error as Error).message}`);
+      throw new InternalError(
+        `Error deleting ${fileType} backup file: ${(error as Error).message}`
+      );
     }
   }
 }

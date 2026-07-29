@@ -893,9 +893,7 @@ describe('BloomFilterManager add() input safety', () => {
 
   it('add() after destroy() throws instead of silently dropping the revocation', () => {
     manager.destroy();
-    expect(() => manager.add('some-token')).toThrow(
-      'Cannot add token: revoker is shutting down.'
-    );
+    expect(() => manager.add('some-token')).toThrow('Cannot add token: revoker is shutting down.');
   });
 });
 
