@@ -9,6 +9,7 @@ export default defineConfig({
     hookTimeout: 20000,
     coverage: {
       provider: 'v8',
+      reporter: ['text', 'text-summary', 'html'],
       include: ['dist/**/*.ts'],
       exclude: [
         // Example/demo gRPC client scripts (top-level side effects, not library code)
