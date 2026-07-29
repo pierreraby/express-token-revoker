@@ -18,9 +18,9 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
 });
 
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition);
-const revokerProto = protoDescriptor.revoker;
+const revokerProto: any = protoDescriptor.revoker;
 
-export function createRevokerClientAsync(serverAddress) {
+export function createRevokerClientAsync(serverAddress: string) {
   const client = new revokerProto.RevokerAdmin(serverAddress, grpc.credentials.createInsecure());
 
   const promisifiedClient = {
