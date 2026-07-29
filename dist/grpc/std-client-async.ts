@@ -35,90 +35,82 @@ export function createRevokerClientAsync(serverAddress: string) {
   return promisifiedClient;
 }
 
-const clientAsync = createRevokerClientAsync('localhost:50051');
+// Only run the demo below when the file is executed directly (`node dist/grpc/std-client-async.js`).
+// When imported as a module (e.g. by tests or a client app), no side effects are triggered.
+if (process.argv[1] === __filename) {
+  const clientAsync = createRevokerClientAsync('localhost:50051');
 
-let revokerId = 'JWTrevoker';
+  let revokerId = 'JWTrevoker';
 
-const item = 'item1';
+  const item = 'item1';
 
-try {
-  // Example of calling the ListRevokers method
-  const listResponse = await clientAsync.ListRevokers({});
-  console.log('List Response:', listResponse);
+  try {
+    const listResponse = await clientAsync.ListRevokers({});
+    console.log('List Response:', listResponse);
 
-  // Example of calling the Add method
-  const addResponse = await clientAsync.add({ revokerId, item });
-  console.log('Add Response:', addResponse);
+    const addResponse = await clientAsync.add({ revokerId, item });
+    console.log('Add Response:', addResponse);
 
-  // Example of calling the Has method
-  const hasResponse1 = await clientAsync.has({ revokerId, item });
-  console.log('Has Response (1):', hasResponse1);
+    const hasResponse1 = await clientAsync.has({ revokerId, item });
+    console.log('Has Response (1):', hasResponse1);
 
-  // Example of calling the getMetrics method
-  const metricsResponse = await clientAsync.getMetrics({ revokerId });
-  const estimatedMetrics = metricsResponse.estimatedMetrics;
-  const configuration = metricsResponse.configuration;
-  console.log('Estimated Metrics:', estimatedMetrics);
-  console.log('Configuration:', configuration);
+    const metricsResponse = await clientAsync.getMetrics({ revokerId });
+    const estimatedMetrics = metricsResponse.estimatedMetrics;
+    const configuration = metricsResponse.configuration;
+    console.log('Estimated Metrics:', estimatedMetrics);
+    console.log('Configuration:', configuration);
 
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+    await new Promise((resolve) => setTimeout(resolve, 1500));
 
-  // Example of calling the ResetAndRestore method
-  const resetRestoreResponse = await clientAsync.resetAndRestore({ revokerId });
-  console.log('ResetAndRestore Response:', resetRestoreResponse);
+    const resetRestoreResponse = await clientAsync.resetAndRestore({ revokerId });
+    console.log('ResetAndRestore Response:', resetRestoreResponse);
 
-  const hasResponse2 = await clientAsync.has({ revokerId, item });
-  console.log('Has Response (2):', hasResponse2);
+    const hasResponse2 = await clientAsync.has({ revokerId, item });
+    console.log('Has Response (2):', hasResponse2);
 
-  // Example of calling the ResetAndClearData method
-  const resetClearDataResponse = await clientAsync.resetAndClearData({ revokerId });
-  console.log('ResetAndClearData Response:', resetClearDataResponse);
+    const resetClearDataResponse = await clientAsync.resetAndClearData({ revokerId });
+    console.log('ResetAndClearData Response:', resetClearDataResponse);
 
-  const hasResponse3 = await clientAsync.has({ revokerId, item });
-  console.log('Has Response (3):', hasResponse3);
-} catch (error) {
-  console.error('Error during gRPC call:', error);
+    const hasResponse3 = await clientAsync.has({ revokerId, item });
+    console.log('Has Response (3):', hasResponse3);
+  } catch (error) {
+    console.error('Error during gRPC call:', error);
+  }
+
+  revokerId = 'opaqueRevoker';
+
+  try {
+    const listResponse = await clientAsync.ListRevokers({});
+    console.log('List Response:', listResponse);
+
+    const addResponse = await clientAsync.add({ revokerId, item });
+    console.log('Add Response:', addResponse);
+
+    const hasResponse1 = await clientAsync.has({ revokerId, item });
+    console.log('Has Response (1):', hasResponse1);
+
+    const metricsResponse = await clientAsync.getMetrics({ revokerId });
+    const estimatedMetrics = metricsResponse.estimatedMetrics;
+    const configuration = metricsResponse.configuration;
+    console.log('Estimated Metrics:', estimatedMetrics);
+    console.log('Configuration:', configuration);
+
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    const resetRestoreResponse = await clientAsync.resetAndRestore({ revokerId });
+    console.log('ResetAndRestore Response:', resetRestoreResponse);
+
+    const hasResponse2 = await clientAsync.has({ revokerId, item });
+    console.log('Has Response (2):', hasResponse2);
+
+    const resetClearDataResponse = await clientAsync.resetAndClearData({ revokerId });
+    console.log('ResetAndClearData Response:', resetClearDataResponse);
+
+    const hasResponse3 = await clientAsync.has({ revokerId, item });
+    console.log('Has Response (3):', hasResponse3);
+  } catch (error) {
+    console.error('Error during gRPC call:', error);
+  }
+
+  clientAsync.close();
 }
-
-revokerId = 'opaqueRevoker';
-
-try {
-  // Example of calling the ListRevokers method
-  const listResponse = await clientAsync.ListRevokers({});
-  console.log('List Response:', listResponse);
-
-  // Example of calling the Add method
-  const addResponse = await clientAsync.add({ revokerId, item });
-  console.log('Add Response:', addResponse);
-
-  // Example of calling the Has method
-  const hasResponse1 = await clientAsync.has({ revokerId, item });
-  console.log('Has Response (1):', hasResponse1);
-
-  // Example of calling the getMetrics method
-  const metricsResponse = await clientAsync.getMetrics({ revokerId });
-  const estimatedMetrics = metricsResponse.estimatedMetrics;
-  const configuration = metricsResponse.configuration;
-  console.log('Estimated Metrics:', estimatedMetrics);
-  console.log('Configuration:', configuration);
-
-  await new Promise((resolve) => setTimeout(resolve, 1500));
-
-  // Example of calling the ResetAndRestore method
-  const resetRestoreResponse = await clientAsync.resetAndRestore({ revokerId });
-  console.log('ResetAndRestore Response:', resetRestoreResponse);
-
-  const hasResponse2 = await clientAsync.has({ revokerId, item });
-  console.log('Has Response (2):', hasResponse2);
-
-  // Example of calling the ResetAndClearData method
-  const resetClearDataResponse = await clientAsync.resetAndClearData({ revokerId });
-  console.log('ResetAndClearData Response:', resetClearDataResponse);
-
-  const hasResponse3 = await clientAsync.has({ revokerId, item });
-  console.log('Has Response (3):', hasResponse3);
-} catch (error) {
-  console.error('Error during gRPC call:', error);
-}
-
-clientAsync.close();

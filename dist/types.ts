@@ -15,6 +15,33 @@ export interface GenericLogger {
 }
 
 /**
+ * Result of a single health check component.
+ */
+export interface HealthCheckComponent {
+  /** Whether this component is healthy. */
+  healthy: boolean;
+  /** Error message if unhealthy. */
+  error?: string;
+}
+
+/**
+ * Overall health status of the token revoker.
+ */
+export interface HealthStatus {
+  /** True when all components are healthy. */
+  healthy: boolean;
+  /** Per-component health checks. */
+  checks: {
+    /** Storage (backup directory writable). */
+    storage: HealthCheckComponent;
+    /** Bloom filter (current filter initialized). */
+    filter: HealthCheckComponent;
+    /** Rotation (interval timer running). */
+    rotation: HealthCheckComponent;
+  };
+}
+
+/**
  * Store managing the registered Revoker instances (used by gRPC).
  */
 export interface RevokerStore {
