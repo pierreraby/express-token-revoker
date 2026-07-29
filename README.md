@@ -325,14 +325,56 @@ The admin service is **unauthenticated**. By default it binds to `127.0.0.1` (lo
 
 Revocation state lives **in the process** that runs the revoker. In the current standalone topology, run one gRPC-enabled revoker process and administer it through the gRPC API; other services call it over gRPC. Transparent multi-instance synchronization is on the roadmap (distributed mode).
 
+## Benchmarks
+
+A reproducible benchmark suite lives in [`benchmarks/`](./benchmarks) and measures the **built** library (`build/`), i.e. the exact code that ships. Run the whole suite (builds first):
+
+```bash
+pnpm bench
+```
+
+Or individually: `pnpm bench:throughput`, `bench:jwt`, `bench:fpr`, `bench:memory`.
+
+### In-memory throughput (1M items, backup disabled)
+
+This isolates the bloom-filter hot path — no disk I/O. It compares the raw `BloomFilter` data structure against the production `BloomFilterManager` (which adds input validation, the saturation guard, metrics counters and the rotation mutex on top):
+
+| Operation | Raw `BloomFilter` | `BloomFilterManager` |
+| :-- | --: | --: |
+| `add()` | ~875,000 /s | ~1,300,000 /s |
+| `has()` / `test()` | ~1,460,000 /s | ~1,480,000 /s |
+
+The production layer adds **no measurable overhead on the read path** (`has()`) and stays in the same order of magnitude on writes. These are pure in-memory figures — with `backup: true`, the synchronous write-ahead log dominates `add()` latency (see [Add latency](#add-latency)).
+
+### Memory footprint (3-filter rotation, fpRate = 1e-9)
+
+The manager keeps three filters alive (previous, current, next). Measured external memory matches the theoretical size `m = ⌈−n·log₂(p) / ln 2⌉` exactly:
+
+| | Measured | Theoretical |
+| :-- | --: | --: |
+| Per filter (1M items) | 5.14 MB | 5.14 MB |
+| 3-filter total | 15.43 MB | — |
+
+### False-positive rate (1M items, target 1e-5)
+
+Empirical validation over 5M probes against never-inserted claims: measured **9 × 10⁻⁶**, within the configured target. (`withTargetError()` rounds the bit and hash counts up to integers, so the realized FPR normally lands at or just above the nominal target — expected bloom-filter behavior.)
+
+### JWT baseline
+
+`pnpm bench:jwt` measures `jwt.verify()` alone, to put the revocation check in perspective: the bloom `has()` runs orders of magnitude faster than the signature verification the caller already pays for, so revocation adds negligible relative cost.
+
+> **Node ≥ 26 note**: `jsonwebtoken@9` currently fails to load on Node ≥ 26 (its transitive dep `buffer-equal-constant-time` relies on the removed `SlowBuffer`). The JWT bench skips cleanly there and runs normally on Node 20–24.
+
+> Figures are indicative — run the suite on your own hardware for representative numbers.
+
 ## Examples
 
 The runnable demo in `examples/standalone/` uses the compiled output:
 
 ```bash
-npm run build   # once, or after library changes
-npm start       # HTTP API + gRPC admin on 127.0.0.1:50051
-npm run client  # exercises the API in another terminal
+pnpm build   # once, or after library changes
+pnpm start       # HTTP API + gRPC admin on 127.0.0.1:50051
+pnpm client  # exercises the API in another terminal
 ```
 
 ## License
