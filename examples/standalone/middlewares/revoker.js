@@ -1,6 +1,6 @@
 
 // @ts-check 
-import { createRevoker } from '#dist/index.js';
+import { createRevoker } from '#build/index.js';
 import logger from '#logger';
 
 const JWTconfig = { // this config uses ~21MB of memory
@@ -64,7 +64,9 @@ try {
   opaqueRevokerCustom = await createRevoker(opaqueConfigCustom);
   opaqueFilterCustom = opaqueRevokerCustom.getMiddleware();
 } catch (error) {
-  logger.error(`Error creating revoker: ${error.message}`);
+  logger.error(
+    `Error creating revoker: ${error instanceof Error ? error.message : String(error)}`
+  );
 }
 
 

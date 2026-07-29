@@ -58,7 +58,9 @@ const RevokerStore: RevokerStoreType = (() => {
     findInstance(revokerId: string, logger: GenericLogger) {
       const revokerInstance = instancesMap ? instancesMap.get(revokerId) : undefined;
       if (!hasNonNullableBloomFilterManager(revokerInstance)) {
-        logger.error('Revoker instance or Bloom filter not found');
+        // debug, not error: probing unknown ids is expected client behavior
+        // and error-level logging would spam on every miss.
+        logger.debug('Revoker instance or Bloom filter not found');
         return undefined;
       }
       return revokerInstance;

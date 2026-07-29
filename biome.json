@@ -72,6 +72,26 @@
   },
   "overrides": [
     {
+      "includes": ["src/Inputs-validation.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noThenProperty": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/index.ts"],
+      "linter": {
+        "rules": {
+          "performance": {
+            "noBarrelFile": "off"
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/*.{test,spec}.{ts,tsx,js,jsx}"],
       "linter": {
         "rules": {

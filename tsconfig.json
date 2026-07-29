@@ -4,7 +4,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
-    "rootDir": "dist",
+    "rootDir": "src",
     "outDir": "build",
     "strict": true,
     "useUnknownInCatchVariables": false,
@@ -14,5 +14,5 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true
   },
-  "include": ["dist/**/*.ts"]
+  "include": ["src/**/*.ts"]
 }

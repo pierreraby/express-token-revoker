@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { logOrThrottle } from '../../dist/throttle.js';
+import { logOrThrottle } from '../../src/throttle.js';
 import { createMockLogger, type MockLogger } from '../helpers/mock-logger.js';
 
 describe('Throttle Tests', () => {

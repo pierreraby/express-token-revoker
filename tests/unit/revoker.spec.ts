@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
-import { Revoker } from '../../dist/index.js';
-import { BloomFilterManager } from '../../dist/Bloom-filter-manager.js';
-import RevokerStore from '../../dist/revokerStore.js';
+import { Revoker } from '../../src/index.js';
+import { BloomFilterManager } from '../../src/Bloom-filter-manager.js';
 import { createMockLogger, type MockLogger } from '../helpers/mock-logger.js';
 
 describe('Revoker Constructor Validation Tests', () => {
@@ -415,7 +414,10 @@ describe('Revoker Class Tests', () => {
     await revoker._grpcInit();
     expect(revokerStore.init).toHaveBeenCalledOnce();
     expect(startServerSpy).toHaveBeenCalledOnce();
-    expect(startServerSpy).toHaveBeenCalledWith(50051, RevokerStore, logger);
+    expect(startServerSpy).toHaveBeenCalledWith(50051, revokerStore, logger, {
+      host: '127.0.0.1',
+      allowInsecureRemote: false,
+    });
     expect(revokerStore.registerInstance).toHaveBeenCalledOnce();
     expect(revokerStore.registerInstance).toHaveBeenCalledWith(revoker);
     expect(Revoker.grpcServerStarted).toBe(true);
@@ -532,6 +534,160 @@ describe('Revoker Class Tests', () => {
     await revoker.destroy();
   });
 
+  it('grpcInit cleans up the store when the server fails to bind (next createRevoker can recover)', async () => {
+    const startServerSpy = vi.fn().mockImplementation(() => {
+      throw new Error('Port in use');
+    });
+    const stopServerSpy = vi.fn();
+
+    const revokerStore = {
+      init: vi.fn(),
+      registerInstance: vi.fn(),
+      unregisterInstance: vi.fn(),
+      isEmpty: vi.fn().mockReturnValue(true),
+      destroy: vi.fn(),
+    };
+
+    const revoker = new Revoker(
+      {
+        id: 'test',
+        claimsToCheck: ['claim1'],
+        payloadKey: 'token',
+        logger,
+        filter: { numItems: 1000, fpRate: 0.01, rotateTime: 2000 },
+        grpcEnabled: true,
+        grpcPort: 50051,
+      },
+      { startServerFn: startServerSpy as any, stopServerFn: stopServerSpy as any },
+      revokerStore as any
+    );
+
+    await expect(revoker._grpcInit()).rejects.toThrow('Failed to start gRPC server: Port in use');
+    // The store must not stay initialized forever after a failed bind
+    expect(revokerStore.init).toHaveBeenCalledOnce();
+    expect(revokerStore.destroy).toHaveBeenCalledOnce();
+
+    // A later createRevoker with a working server must be able to re-init the store
+    const startServerOk = vi.fn();
+    const revokerStore2 = {
+      init: vi.fn(),
+      registerInstance: vi.fn(),
+      unregisterInstance: vi.fn(),
+      isEmpty: vi.fn().mockReturnValue(true),
+      destroy: vi.fn(),
+    };
+    const revoker2 = new Revoker(
+      {
+        id: 'test',
+        claimsToCheck: ['claim1'],
+        payloadKey: 'token',
+        logger,
+        filter: { numItems: 1000, fpRate: 0.01, rotateTime: 2000 },
+        grpcEnabled: true,
+        grpcPort: 50051,
+      },
+      { startServerFn: startServerOk as any, stopServerFn: stopServerSpy as any },
+      revokerStore2 as any
+    );
+    await revoker2._grpcInit();
+    expect(revokerStore2.init).toHaveBeenCalledOnce();
+    expect(startServerOk).toHaveBeenCalledOnce();
+    expect(Revoker.grpcServerStarted).toBe(true);
+    await revoker2.destroy();
+  });
+
+  it('concurrent _grpcInit calls share a single server initialization', async () => {
+    let resolveBind: (() => void) | undefined;
+    const startServerSpy = vi
+      .fn()
+      .mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveBind = resolve;
+          })
+      );
+    const stopServerSpy = vi.fn();
+
+    const revokerStore = {
+      init: vi.fn(),
+      registerInstance: vi.fn(),
+      unregisterInstance: vi.fn(),
+      isEmpty: vi.fn().mockReturnValue(true),
+      destroy: vi.fn(),
+    };
+
+    const makeRevoker = (id: string) =>
+      new Revoker(
+        {
+          id,
+          claimsToCheck: ['claim1'],
+          payloadKey: 'token',
+          logger,
+          filter: { numItems: 1000, fpRate: 0.01, rotateTime: 2000 },
+          grpcEnabled: true,
+          grpcPort: 50051,
+        },
+        { startServerFn: startServerSpy as any, stopServerFn: stopServerSpy as any },
+        revokerStore as any
+      );
+
+    const revokerA = makeRevoker('test-a');
+    const revokerB = makeRevoker('test-b');
+
+    const initA = revokerA._grpcInit();
+    const initB = revokerB._grpcInit();
+
+    // Let both calls reach the shared initialization promise, then release the bind
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(revokerStore.init).toHaveBeenCalledOnce();
+    expect(startServerSpy).toHaveBeenCalledOnce();
+    resolveBind!();
+
+    await Promise.all([initA, initB]);
+    expect(revokerStore.registerInstance).toHaveBeenCalledTimes(2);
+    expect(Revoker.grpcServerStarted).toBe(true);
+
+    await revokerA.destroy();
+    await revokerB.destroy();
+  });
+
+  it('shutdown unregisters the instance and stops the server when it is the last one', async () => {
+    const startServerSpy = vi.fn();
+    const stopServerSpy = vi.fn();
+
+    const revokerStore = {
+      init: vi.fn(),
+      registerInstance: vi.fn(),
+      unregisterInstance: vi.fn(),
+      isEmpty: vi.fn().mockReturnValue(true),
+      destroy: vi.fn(),
+    };
+
+    const revoker = new Revoker(
+      {
+        id: 'test-shutdown-grpc',
+        claimsToCheck: ['claim1'],
+        payloadKey: 'token',
+        logger,
+        filter: { numItems: 1000, fpRate: 0.01, rotateTime: 2000 },
+        grpcEnabled: true,
+        grpcPort: 50051,
+      },
+      { startServerFn: startServerSpy as any, stopServerFn: stopServerSpy as any },
+      revokerStore as any
+    );
+
+    await revoker._grpcInit();
+    expect(Revoker.grpcServerStarted).toBe(true);
+
+    await revoker.shutdown();
+    expect(revokerStore.unregisterInstance).toHaveBeenCalledWith('test-shutdown-grpc');
+    expect(revokerStore.destroy).toHaveBeenCalledOnce();
+    expect(stopServerSpy).toHaveBeenCalledOnce();
+    expect(Revoker.grpcServerStarted).toBe(false);
+    expect(revoker.bloomFilterManager).toBeNull();
+  });
+
   it('add method handles empty or invalid input', async () => {
     const revoker = new Revoker({
       id: 'test',
@@ -571,10 +727,6 @@ describe('Revoker Class Tests', () => {
       grpcEnabled: true,
       grpcPort: 50051,
     });
-    console.log(revoker.constructor);
-    await revoker._grpcInit();
-    console.log('toto');
-
     expect(() => revoker.add('test')).toThrow('gRPC is enabled, use the gRPC method instead');
     await revoker.destroy();
   });

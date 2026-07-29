@@ -1,4 +1,5 @@
 import type { RequestHandler, Request, Response, NextFunction } from 'express';
+import { createHash } from 'node:crypto';
 import type { GenericLogger } from './types.js';
 import type { BloomFilterManager } from './Bloom-filter-manager.js';
 import { ValidationError } from './errors.js';
@@ -11,17 +12,24 @@ export interface JWTPayload {
   sub?: string;
   /** Audience claim. */
   aud?: string;
-  /** Expiration time claim. */
-  exp?: string;
-  /** Not before claim. */
-  nbf?: string;
-  /** Issued at claim. */
-  iat?: string;
+  /** Expiration time claim (seconds since epoch). */
+  exp?: number;
+  /** Not before claim (seconds since epoch). */
+  nbf?: number;
+  /** Issued at claim (seconds since epoch). */
+  iat?: number;
   /** JWT ID claim. */
   jti?: string;
   /** Allows adding additional claims. */
   [anyOtherClaim: string]: any;
 }
+
+/**
+ * Returns a short, non-reversible fingerprint of a token for logging.
+ * Raw tokens are bearer secrets and must never appear in logs.
+ */
+const redactToken = (token: string): string =>
+  createHash('sha256').update(token).digest('hex').slice(0, 8);
 
 /**
  * Middleware factory to check claims with the Bloom filter.
@@ -59,12 +67,13 @@ export const createJWTMiddleware = (
    * @throws If the claim is missing or blacklisted.
    */
   const validateClaim = (payload: JWTPayload, claim: string): boolean => {
-    if (!payload[claim]) {
+    if (payload[claim] === undefined || payload[claim] === null) {
       throw new ValidationError(`Missing ${claim} claim in JWT Payload`);
     }
 
     if (bloomFilterManager.has(`${claim}-${payload[claim]}`)) {
-      logOrThrottle(`Token ${claim}-${payload[claim]} is blacklisted`, throttleJWT, logger, false);
+      // Never log the claim value — it may be sensitive.
+      logOrThrottle(`Token with claim '${claim}' is blacklisted`, throttleJWT, logger, false);
       return false;
     }
     return true;
@@ -102,7 +111,7 @@ export const createJWTMiddleware = (
           message: error.message,
         });
       } else {
-        logger.error(`Unexpected error during JWT validation: ${error.message}`);
+        logger.error(`Unexpected error during JWT validation: ${(error as Error).message}`);
         res.status(500).json({
           error: 'internal_error',
           message: 'An unexpected error occurred',
@@ -163,7 +172,12 @@ export const createOpaqueMiddleware = (
    */
   const validateToken = (token: string, bloomFilterManager: BloomFilterManager): boolean => {
     if (token && bloomFilterManager.has(token)) {
-      logOrThrottle(`Token ${token} is blacklisted`, throttleOpaque, logger, false);
+      logOrThrottle(
+        `Token (sha256:${redactToken(token)}) is blacklisted`,
+        throttleOpaque,
+        logger,
+        false
+      );
       return false;
     }
     return true;
@@ -192,7 +206,9 @@ export const createOpaqueMiddleware = (
           message: error.message,
         });
       } else {
-        logger.error(`Unexpected error during opaque token validation: ${error.message}`);
+        logger.error(
+          `Unexpected error during opaque token validation: ${(error as Error).message}`
+        );
         res.status(500).json({
           error: 'internal_error',
           message: 'An unexpected error occurred',

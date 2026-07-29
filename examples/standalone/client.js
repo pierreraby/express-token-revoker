@@ -66,7 +66,7 @@ const revokeJWT = async (tokens, claim) => {
   for (const token of tokens) {
     // extract jti from token
     const payload64 = token.split('.')[1];
-    const payloadDecoded = Buffer.from(payload64, 'base64').toString('utf-8');
+    const payloadDecoded = Buffer.from(payload64, 'base64url').toString('utf-8');
     const payload = JSON.parse(payloadDecoded);
 
     const revoke = await fetch(`http://localhost:3000/revoke/jti/${payload[claim]}`, {

@@ -1,47 +1,80 @@
 {
-  "name": "express-jwt-revoker",
+  "name": "express-token-revoker",
   "version": "1.0.0",
-  "description": "",
+  "description": "High-performance, crash-safe token revocation middleware for Express — Bloom filters with automatic rotation, WAL-based crash recovery, and optional gRPC admin.",
   "main": "./build/index.js",
   "types": "./build/index.d.ts",
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "exports": {
+    ".": {
+      "types": "./build/index.d.ts",
+      "import": "./build/index.js"
+    }
+  },
+  "files": [
+    "build"
+  ],
+  "keywords": [
+    "express",
+    "middleware",
+    "jwt",
+    "token",
+    "revocation",
+    "blacklist",
+    "bloom-filter",
+    "grpc",
+    "security"
+  ],
+  "author": "Pierre Raby",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pierreraby/express-token-revoker.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pierreraby/express-token-revoker/issues"
+  },
+  "homepage": "https://github.com/pierreraby/express-token-revoker#readme",
+  "engines": {
+    "node": ">=20"
+  },
   "type": "module",
   "scripts": {
     "start": "node --env-file=.env ./examples/standalone/app.js",
     "dev": "nodemon --env-file=.env ./examples/standalone/app.js",
     "client": "node --env-file=.env ./examples/standalone/client.js",
     "test": "vitest run",
-    "build": "tsc && mkdir -p build/grpc/protos && cp -r dist/grpc/protos/. build/grpc/protos/",
+    "build": "tsc && node scripts/copy-protos.mjs",
     "clear": "node -e \"const fs=require('fs'); const path=require('path'); const dir='./backup'; if(fs.existsSync(dir)) fs.readdirSync(dir).forEach(f => fs.rmSync(path.join(dir, f)))\"",
     "test:watch": "vitest",
-    "test:coverage": "c8 vitest run"
+    "test:coverage": "c8 vitest run",
+    "prepublishOnly": "npm run build && npm test"
   },
   "imports": {
-    "#dist/*": "./build/*",
+    "#build/*": "./build/*",
     "#logger": "./examples/logger.js"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.12.5",
     "@grpc/proto-loader": "^0.7.13",
     "async-mutex": "^0.5.0",
-    "express": "^4.21.2",
     "joi": "^17.13.3",
-    "jsonwebtoken": "^9.0.2",
-    "pino": "^9.6.0",
-    "pino-pretty": "^13.0.0",
     "throttleit": "^2.1.0"
+  },
+  "peerDependencies": {
+    "express": "^4.17.21 || ^5.0.0"
   },
   "devDependencies": {
     "@types/express": "^4.17.25",
     "@types/node": "^26.1.2",
     "@types/supertest": "^7.2.1",
-    "@types/throttleit": "^1.0.2",
     "@vitest/coverage-v8": "^4.1.10",
     "@vitest/ui": "^4.1.10",
     "c8": "^12.0.0",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
     "nodemon": "^3.1.9",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
     "supertest": "^7.2.2",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"

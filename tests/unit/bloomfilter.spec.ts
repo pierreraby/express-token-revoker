@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BloomFilter } from '../../dist/bloomfilter.js';
+import { BloomFilter } from '../../src/bloomfilter.js';
 
 describe('BloomFilter static methods', () => {
   it('withTargetError creates a filter with correct dimensions', () => {

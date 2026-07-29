@@ -12,14 +12,8 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'text-summary', 'html'],
       reportOnFailure: true,
-      include: ['dist/**/*.ts'],
-      exclude: [
-        'dist/grpc/std-client.ts',
-        'dist/grpc/std-client-async.ts',
-        'dist/types.ts',
-        'dist/mytest.js',
-        'dist/Bloom-filter-manager copy.js',
-      ],
+      include: ['src/**/*.ts'],
+      exclude: ['src/grpc/std-client.ts', 'src/grpc/std-client-async.ts', 'src/types.ts'],
     },
   },
 });

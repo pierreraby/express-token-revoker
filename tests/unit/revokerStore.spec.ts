@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import RevokerStore from '../../dist/revokerStore.js';
+import RevokerStore from '../../src/revokerStore.js';
 import { createMockLogger, type MockLogger } from '../helpers/mock-logger.js';
 
 describe('RevokerStore validation', () => {
@@ -66,12 +66,12 @@ describe('RevokerStore validation', () => {
     expect(found).toBe(revokerInstance);
   });
 
-  it('RevokerStore - findInstance should log error and return undefined if bloomFilterManager is null', () => {
+  it('RevokerStore - findInstance should log at debug level and return undefined if bloomFilterManager is null', () => {
     revokerInstance.bloomFilterManager = null;
     RevokerStore.registerInstance(revokerInstance);
     const found = RevokerStore.findInstance(revokerInstance.id, logger);
     expect(found).toBeUndefined();
-    expect(logger.error).toHaveBeenCalledWith('Revoker instance or Bloom filter not found');
+    expect(logger.debug).toHaveBeenCalledWith('Revoker instance or Bloom filter not found');
   });
 
   it('RevokerStore - findInstance should return undefined if instance is not found', () => {
@@ -79,11 +79,11 @@ describe('RevokerStore validation', () => {
     expect(found).toBeUndefined();
   });
 
-  it('RevokerStore - findInstance should log error if store is not initialized and return undefined', () => {
+  it('RevokerStore - findInstance should log at debug level if store is not initialized and return undefined', () => {
     RevokerStore.destroy();
     const found = RevokerStore.findInstance(revokerInstance.id, logger);
     expect(found).toBeUndefined();
-    expect(logger.error).toHaveBeenCalledWith('Revoker instance or Bloom filter not found');
+    expect(logger.debug).toHaveBeenCalledWith('Revoker instance or Bloom filter not found');
   });
 
   it('RevokerStore - listInstances should list all registered instance ids', () => {
@@ -130,10 +130,10 @@ describe('RevokerStore validation', () => {
   });
 
   it('RevokerStore - multiple instances share the same store', () => {
-    const instance2 = {
+    const instance2: any = {
       id: 'test-revoker-2',
       logger: createMockLogger(),
-      bloomFilterManager: {},
+      bloomFilterManager: {}, // non-null object
     };
     RevokerStore.registerInstance(revokerInstance);
     RevokerStore.registerInstance(instance2);

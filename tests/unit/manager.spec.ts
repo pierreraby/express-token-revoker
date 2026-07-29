@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import fs from 'fs';
-import { BloomFilterManager } from '../../dist/Bloom-filter-manager.js';
+import os from 'os';
+import path from 'path';
+import { BloomFilterManager } from '../../src/Bloom-filter-manager.js';
 import { createMockLogger, type MockLogger } from '../helpers/mock-logger.js';
 
 describe('BloomFilterManager Constructor Validation', () => {
@@ -74,7 +76,22 @@ describe('BloomFilterManager Constructor Validation', () => {
           rotateTime: 1000,
           logger,
         })
-    ).toThrow('Invalid input: "fpRate" must be less than or equal to 1');
+    ).toThrow('Invalid input: "fpRate" must be less than 1');
+  });
+
+  it('constructor throws error for fpRate === 1 (exclusive bound)', () => {
+    // fpRate = 1 would compute a degenerate filter (m = 0) where every has()
+    // returns true — a total fail-closed denial of service.
+    expect(
+      () =>
+        new BloomFilterManager({
+          id: 'test',
+          numItems: 1000,
+          fpRate: 1,
+          rotateTime: 1000,
+          logger,
+        })
+    ).toThrow('Invalid input: "fpRate" must be less than 1');
   });
 
   it('constructor throws error for invalid fpRate < 0', () => {
@@ -831,5 +848,114 @@ describe('BloomFilterBackupManager restore and edge cases', () => {
 
     backupRotateSpy.mockRestore();
     mgr.destroy();
+  });
+});
+
+describe('BloomFilterManager add() input safety', () => {
+  let logger: MockLogger;
+  let manager: BloomFilterManager;
+
+  beforeEach(() => {
+    logger = createMockLogger();
+    manager = new BloomFilterManager({
+      id: 'test-input-safety',
+      logger,
+      numItems: 1000,
+      fpRate: 0.01,
+      rotateTime: 60000,
+    });
+  });
+
+  afterEach(() => {
+    manager.destroy();
+    vi.restoreAllMocks();
+  });
+
+  it('add() rejects values containing line breaks or null bytes (WAL poisoning)', () => {
+    expect(() => manager.add('evil\nsub-jti')).toThrow(
+      'Value must not contain line breaks or null characters'
+    );
+    expect(() => manager.add('evil\r\nvalue')).toThrow(
+      'Value must not contain line breaks or null characters'
+    );
+    expect(() => manager.add('evil\0value')).toThrow(
+      'Value must not contain line breaks or null characters'
+    );
+  });
+
+  it('add() rejects values longer than 4096 characters', () => {
+    expect(() => manager.add('x'.repeat(4097))).toThrow(
+      'Value exceeds maximum length of 4096 characters'
+    );
+    // Boundary: 4096 is accepted
+    expect(() => manager.add('x'.repeat(4096))).not.toThrow();
+  });
+
+  it('add() after destroy() throws instead of silently dropping the revocation', () => {
+    manager.destroy();
+    expect(() => manager.add('some-token')).toThrow(
+      'Cannot add token: revoker is shutting down.'
+    );
+  });
+});
+
+describe('BloomFilterManager backup restore resilience', () => {
+  let logger: MockLogger;
+  let backupDir: string;
+
+  beforeEach(() => {
+    logger = createMockLogger();
+    backupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revoker-restore-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(backupDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  const baseConfig = (id: string) => ({
+    id,
+    numItems: 1000,
+    fpRate: 0.01,
+    rotateTime: 60000,
+    backup: true as const,
+  });
+
+  it('starts with an empty filter when the blob is truncated (torn write)', () => {
+    const id = 'test-torn-blob';
+    // Write a blob whose size does not match the filter geometry
+    fs.writeFileSync(path.join(backupDir, `current-${id}.blob`), Buffer.from([1, 2, 3]));
+
+    const manager = new BloomFilterManager({ ...baseConfig(id), logger, backupDir });
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('blob size does not match the configured filter')
+    );
+    // The instance must still be usable, with an empty filter
+    expect(manager.has('anything')).toBe(false);
+    expect(() => manager.add('new-token')).not.toThrow();
+    expect(manager.has('new-token')).toBe(true);
+    manager.destroy();
+  });
+
+  it('ignores a blob written for a different filter configuration', async () => {
+    const id = 'test-geometry-mismatch';
+    // Snapshot a 50k-item filter to disk
+    const big = new BloomFilterManager({
+      ...baseConfig(id),
+      numItems: 50_000,
+      logger: createMockLogger(),
+      backupDir,
+    });
+    await big.backupManager!.backupLocal(big.current!);
+    big.destroy();
+
+    // Restart with a smaller configuration: the blob geometry no longer matches
+    const manager = new BloomFilterManager({ ...baseConfig(id), logger, backupDir });
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('blob size does not match the configured filter')
+    );
+    expect(manager.has('token-1')).toBe(false);
+    manager.destroy();
   });
 });

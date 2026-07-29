@@ -1,7 +1,7 @@
 // @ts-check 
 import express from 'express';
 import logger from '../logger.js';
-import { ValidationError, InternalError } from '#dist/errors.js';
+import { ValidationError, InternalError } from '#build/errors.js';
 import { auth, admin } from './middlewares/auth.js';
 import {JWTrevoker, JWTfilter, opaqueRevoker, opaqueFilter,
         opaqueRevokerCustom, opaqueFilterCustom} from './middlewares/revoker.js';
@@ -67,11 +67,11 @@ app.post('/revoke3/:token', admin, JWTfilter, (req, res) => {
 });
 
 // admin restore the Bloom filter
-app.post('/restore', admin, (req, res) => {
+app.post('/restore', admin, async (req, res) => {
   try {
-    JWTrevoker.resetAndRestore();
-    opaqueRevoker.resetAndRestore();
-    opaqueRevokerCustom.resetAndRestore();
+    await JWTrevoker.resetAndRestore();
+    await opaqueRevoker.resetAndRestore();
+    await opaqueRevokerCustom.resetAndRestore();
     res.status(200).json({ message: 'Bloom filters restored' });
   } catch(error) {
     res.status(500).json({ message: `Error: ${ error.message }` });
@@ -79,11 +79,11 @@ app.post('/restore', admin, (req, res) => {
 });
 
 // admin reset the Bloom filter
-app.post('/reset', admin, (req, res) => {
+app.post('/reset', admin, async (req, res) => {
   try {
-    JWTrevoker.resetAndClearData();
-    opaqueRevoker.resetAndClearData();
-    opaqueRevokerCustom.resetAndClearData();
+    await JWTrevoker.resetAndClearData();
+    await opaqueRevoker.resetAndClearData();
+    await opaqueRevokerCustom.resetAndClearData();
     res.status(200).json({ message: 'Bloom filters reset' });
   } catch(error) {
     res.status(500).json({ message: `Error: ${ error.message }` });

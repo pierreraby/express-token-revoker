@@ -1,8 +1,8 @@
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { promisify } from 'util';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,9 +35,9 @@ export function createRevokerClientAsync(serverAddress: string) {
   return promisifiedClient;
 }
 
-// Only run the demo below when the file is executed directly (`node dist/grpc/std-client-async.js`).
+// Only run the demo below when the file is executed directly (`node build/grpc/std-client-async.js`).
 // When imported as a module (e.g. by tests or a client app), no side effects are triggered.
-if (process.argv[1] === __filename) {
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
   const clientAsync = createRevokerClientAsync('localhost:50051');
 
   let revokerId = 'JWTrevoker';

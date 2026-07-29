@@ -99,6 +99,8 @@ export class BloomFilterManager {
   #currentInsertions = 0;
   /** Maximum ratio of insertions / numItems before add() refuses new tokens. */
   static readonly MAX_SATURATION_RATIO = 10;
+  /** Maximum length of a single revocation item. */
+  static readonly MAX_ITEM_LENGTH = 4096;
   /** Whether the manager is shutting down — add() will be rejected. */
   #shuttingDown = false;
   /** Counters for metrics. */
@@ -286,6 +288,18 @@ export class BloomFilterManager {
       throw new ValidationError('Value must be a non-empty string');
     }
 
+    // The write-ahead log stores one token per line: line breaks would split
+    // the token and poison the restore (attacker-chosen fragments revoked).
+    if (/[\r\n\0]/.test(filterItem)) {
+      throw new ValidationError('Value must not contain line breaks or null characters');
+    }
+
+    if (filterItem.length > BloomFilterManager.MAX_ITEM_LENGTH) {
+      throw new ValidationError(
+        `Value exceeds maximum length of ${BloomFilterManager.MAX_ITEM_LENGTH} characters`
+      );
+    }
+
     if (this.#shuttingDown) {
       throw new InternalError('Cannot add token: revoker is shutting down.');
     }
@@ -358,7 +372,7 @@ export class BloomFilterManager {
     } else if (!this.hasRotated) {
       this.logger.debug('No previous filter to get metrics before first rotation');
     }
-    this.logger.info(`Estimated metrics: ${JSON.stringify(metrics)}`);
+    this.logger.debug(`Estimated metrics: ${JSON.stringify(metrics)}`);
 
     return metrics;
   }
@@ -511,8 +525,12 @@ export class BloomFilterManager {
 
   /**
    * Cleans up resources when the instance is destroyed.
+   *
+   * Marks the manager as shutting down so that add() can never silently
+   * succeed on a destroyed manager (which would drop revocations — fail-open).
    */
   destroy(): void {
+    this.#shuttingDown = true;
     this.#stopRotationInterval();
     this.backupManager?.stopBackupInterval();
     this.backupManager?.stopWriteInterval();

@@ -42,8 +42,9 @@ message GetMetricsResponse {
 }
 
 message EstimatedMetrics {
-  int32 currentCount = 1;
-  int32 previousCount = 2;
+  // Estimated counts are fractional (Bloom filter cardinality estimate).
+  double currentCount = 1;
+  double previousCount = 2;
   float currentFpRate = 3;
   float previousFpRate = 4;
 }
@@ -53,7 +54,7 @@ message Configuration {
   float fpRate = 2;
   int32 rotateTime = 3;
   bool backupEnabled = 4;
-  int32 backupTime = 5;
+  int32 backupRatioTime = 5;
 }
 
 message ResetAndRestoreRequest {

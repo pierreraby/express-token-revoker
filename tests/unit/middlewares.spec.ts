@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { BloomFilterManager } from '../../dist/Bloom-filter-manager.js';
-import { createJWTMiddleware, createOpaqueMiddleware } from '../../dist/createMiddlewares.js';
+import { BloomFilterManager } from '../../src/Bloom-filter-manager.js';
+import { createJWTMiddleware, createOpaqueMiddleware } from '../../src/createMiddlewares.js';
 import throttle from 'throttleit';
 import { createMockLogger, type MockLogger } from '../helpers/mock-logger.js';
 
@@ -309,15 +309,14 @@ describe('Middleware Tests', () => {
       },
     };
 
-    try {
-      middleware(req as any, res as any, next as any);
-    } catch (error) {
-      expect((error as Error).message).toBe(`Token ${token} is blacklisted`);
-    }
+    middleware(req as any, res as any, next as any);
 
     expect(next).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(401);
     expect(res.json).toHaveBeenCalledOnce();
+    // The raw token must never appear in logs — only a truncated sha256 fingerprint
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('is blacklisted'));
+    expect(logger.info).not.toHaveBeenCalledWith(expect.stringContaining(token));
   });
 
   it('Opaque Middleware - custom header validation', () => {

@@ -102,14 +102,16 @@ const revoker = await createRevoker({
 | `opaqueHeader` | `string` | Opaque mode | HTTP header name to extract the token from (e.g. `'Authorization'`) |
 | `grpcEnabled` | `boolean` | No | Enable gRPC server for remote revocation |
 | `grpcPort` | `number` | If grpcEnabled | Port for gRPC server |
+| `grpcHost` | `string` | `127.0.0.1` | Host to bind the gRPC server to (loopback only by default — see [gRPC mode](#grpc-mode)) |
+| `grpcAllowInsecureRemote` | `boolean` | `false` | Allow binding the gRPC admin service without TLS on a non-loopback host. Strongly discouraged |
 | `filter` | `FilterConfig` | ✅ | Bloom filter configuration |
 
 ### `FilterConfig`
 
 | Field | Type | Default | Description |
 | ------- | ------ | --------- | ------------- |
-| `numItems` | `number` | — | Expected number of tokens before rotation |
-| `fpRate` | `number` | — | Target false-positive rate (0–1) |
+| `numItems` | `number` | — | Expected number of tokens before rotation (max 100,000,000) |
+| `fpRate` | `number` | — | Target false-positive rate — exclusive range (0, 1) |
 | `rotateTime` | `number` | — | Rotation interval in milliseconds |
 | `backup` | `boolean` | `false` | Enable disk persistence |
 | `backupDir` | `string` | `./backup` | Directory for backup files |
@@ -124,6 +126,10 @@ const revoker = await createRevoker({
 #### `revoker.getMiddleware(): RequestHandler`
 
 Returns the Express middleware. For JWT mode, validates configured claims against the bloom filter. For opaque mode, extracts and checks the token from the configured header.
+
+> **Revocation-only**: the middleware checks whether an *already authenticated* token has been revoked. It does **not** verify signatures or authenticate requests — place it after your authentication middleware (see `examples/standalone/`).
+>
+> **JWT revocation string format**: a claim is revoked as `` `${claim}-${value}` `` (e.g. `jti-abc123`). Call `add()` with the exact same format.
 
 #### `revoker.add(token: string): void`
 
@@ -245,7 +251,7 @@ This means a **revoked token is never missed** — the filter has no false negat
 
 For a Bloom filter designed for `n` items with target FPR `p`, the effective FPR after inserting `c × n` items is:
 
-```
+```text
 FPR(c) = (1 − 2^(−c))^k
 ```
 
@@ -295,8 +301,26 @@ Tokens **in the temp file** (write-ahead log) are always recovered, even without
 
 ## gRPC mode
 
-When `grpcEnabled: true`, the revoker exposes a gRPC server for remote revocation. Direct `add()`/`has()` calls on the instance throw — use the gRPC client instead. See `examples/standalone/` for a complete example.
+When `grpcEnabled: true`, the revoker exposes a gRPC admin server (`RevokerAdmin`: `Add`, `Has`, `GetMetrics`, `ResetAndRestore`, `ResetAndClearData`, `ListRevokers`). Direct `add()`/`has()` calls on the instance throw — use the gRPC client instead. See `examples/standalone/` for a complete example.
+
+### Security
+
+The admin service is **unauthenticated**. By default it binds to `127.0.0.1` (loopback only), so only local processes can reach it. Binding to a non-loopback `grpcHost` without TLS is **refused at startup** unless you explicitly set `grpcAllowInsecureRemote: true` — only do that on an isolated, trusted network, or (recommended) put TLS/mTLS in front and keep the bind local.
+
+### Topology (standalone)
+
+Revocation state lives **in the process** that runs the revoker. In the current standalone topology, run one gRPC-enabled revoker process and administer it through the gRPC API; other services call it over gRPC. Transparent multi-instance synchronization is on the roadmap (distributed mode).
+
+## Examples
+
+The runnable demo in `examples/standalone/` uses the compiled output:
+
+```bash
+npm run build   # once, or after library changes
+npm start       # HTTP API + gRPC admin on 127.0.0.1:50051
+npm run client  # exercises the API in another terminal
+```
 
 ## License
 
-ISC
+MIT — see [LICENCE](./LICENCE). Includes `src/bloomfilter.ts`, derived from Jason Davies' [bloomfilter.js](https://github.com/jasondavies/bloomfilter.js) (MIT).

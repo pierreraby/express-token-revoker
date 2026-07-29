@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import express, { type Express } from 'express';
-import { createRevoker } from '../../dist/index.js';
+import { createRevoker } from '../../src/index.js';
 import { createMockLogger } from '../helpers/mock-logger.js';
 
 /**

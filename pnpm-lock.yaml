@@ -17,21 +17,9 @@ importers:
       async-mutex:
         specifier: ^0.5.0
         version: 0.5.0
-      express:
-        specifier: ^4.21.2
-        version: 4.21.2(supports-color@5.5.0)
       joi:
         specifier: ^17.13.3
         version: 17.13.3
-      jsonwebtoken:
-        specifier: ^9.0.2
-        version: 9.0.2
-      pino:
-        specifier: ^9.6.0
-        version: 9.6.0
-      pino-pretty:
-        specifier: ^13.0.0
-        version: 13.0.0
       throttleit:
         specifier: ^2.1.0
         version: 2.1.0
@@ -45,9 +33,6 @@ importers:
       '@types/supertest':
         specifier: ^7.2.1
         version: 7.2.1
-      '@types/throttleit':
-        specifier: ^1.0.2
-        version: 1.0.2
       '@vitest/coverage-v8':
         specifier: ^4.1.10
         version: 4.1.10(vitest@4.1.10)
@@ -57,9 +42,21 @@ importers:
       c8:
         specifier: ^12.0.0
         version: 12.0.0
+      express:
+        specifier: ^4.21.2
+        version: 4.21.2(supports-color@5.5.0)
+      jsonwebtoken:
+        specifier: ^9.0.2
+        version: 9.0.2
       nodemon:
         specifier: ^3.1.9
         version: 3.1.9
+      pino:
+        specifier: ^9.6.0
+        version: 9.6.0
+      pino-pretty:
+        specifier: ^13.0.0
+        version: 13.0.0
       supertest:
         specifier: ^7.2.2
         version: 7.2.2(supports-color@5.5.0)
@@ -411,9 +408,6 @@ packages:
 
   '@types/supertest@7.2.1':
     resolution: {integrity: sha512-4CbBvoYVLHL7+yhbYrZET0vsvuyXTC05aRe7dNQkwMzm56auceoy6Yu3K50uZmwfHna1os3CMSgM/3QVkUtPTw==}
-
-  '@types/throttleit@1.0.2':
-    resolution: {integrity: sha512-f2fCXlpxXyzkvCovARQRhntFe+CKHxxfEV/1APp5H47Jif9SfXXeMLx1S4UdvnbPH3t3iDFbLylRu5W0hmi4Ug==}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
@@ -2134,8 +2128,6 @@ snapshots:
     dependencies:
       '@types/methods': 1.1.4
       '@types/superagent': 8.1.9
-
-  '@types/throttleit@1.0.2': {}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true

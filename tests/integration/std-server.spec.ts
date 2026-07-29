@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createRevokerClientAsync } from '../../dist/grpc/std-client-async.js';
-import { createRevoker } from '../../dist/index.js';
+import { createRevokerClientAsync } from '../../src/grpc/std-client-async.js';
+import { createRevoker } from '../../src/index.js';
 
 const TEST_PORT = 50052;
-const SERVER_ADDRESS = `localhost:${TEST_PORT}`;
+const SERVER_ADDRESS = `127.0.0.1:${TEST_PORT}`;
 
 describe('gRPC Server Integration Tests', () => {
   let logger: { info: (...args: any[]) => void; error: (...args: any[]) => void; warn: (...args: any[]) => void; debug: (...args: any[]) => void };
@@ -29,6 +29,7 @@ describe('gRPC Server Integration Tests', () => {
         fpRate: 0.0001,
         rotateTime: 10000,
         backup: true,
+        backupRatioTime: 2,
       },
       grpcEnabled: true,
       grpcPort: TEST_PORT,
@@ -72,6 +73,9 @@ describe('gRPC Server Integration Tests', () => {
     const metricsResponse = await client.getMetrics({ revokerId: 'JWTrevoker' });
     expect(metricsResponse.estimatedMetrics).toBeTruthy();
     expect(metricsResponse.configuration).toBeTruthy();
+    // Proto/server field alignment: backupRatioTime must round-trip (was silently
+    // dropped when the proto declared it as backupTime).
+    expect(metricsResponse.configuration.backupRatioTime).toBe(2);
 
     const resetRestoreResponse = await client.resetAndRestore({ revokerId: 'JWTrevoker' });
     expect(resetRestoreResponse.success).toBe(true);
@@ -119,5 +123,23 @@ describe('gRPC Server Integration Tests', () => {
     await expect(client.add({ revokerId: 'unknownRevoker', item: 'item1' })).rejects.toThrow(
       'Revoker instance or Bloom filter not found'
     );
+  });
+
+  it('rejects invalid items with INVALID_ARGUMENT', async () => {
+    // Empty item
+    await expect(client.add({ revokerId: 'JWTrevoker', item: '' })).rejects.toThrow(
+      'item must be a non-empty string'
+    );
+    // Line breaks would poison the write-ahead log
+    await expect(client.add({ revokerId: 'JWTrevoker', item: 'evil\njti-1' })).rejects.toThrow(
+      'item must not contain'
+    );
+    await expect(client.has({ revokerId: 'JWTrevoker', item: 'evil\r\nvalue' })).rejects.toThrow(
+      'item must not contain'
+    );
+    // Oversized item (hard cap against CPU/hash DoS)
+    await expect(
+      client.add({ revokerId: 'JWTrevoker', item: 'x'.repeat(5000) })
+    ).rejects.toThrow('item must not exceed 4096 characters');
   });
 });

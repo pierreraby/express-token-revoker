@@ -22,10 +22,12 @@ export interface FilterConfig {
   backup?: boolean;
   /** Ratio of the rotation time for backups (e.g., 4 for backup every rotateTime / 4). Defaults to no backups. */
   backupRatioTime?: number;
-  /** The absolute path to the backup directory. Defaults to a 'backup' directory relative to the current file. */
+  /** The absolute path to the backup directory. Defaults to a 'backup' directory relative to the current working directory. */
   backupDir?: string;
   /** Whether to enable buffering of items to add to the Bloom filter. Defaults to false. */
   bufferEnabled?: boolean;
+  /** Maximum number of tokens to hold in the write buffer before rejecting new additions. Defaults to numItems * 2. */
+  bufferMaxSize?: number;
 }
 
 interface ConfigBase {
@@ -37,6 +39,17 @@ interface ConfigBase {
   grpcEnabled?: boolean;
   /** The port for the gRPC server. */
   grpcPort?: number;
+  /**
+   * Host to bind the gRPC server to. Defaults to `127.0.0.1` (loopback only).
+   * The gRPC admin service is unauthenticated: do not bind it to a public
+   * interface without TLS in front.
+   */
+  grpcHost?: string;
+  /**
+   * Allow binding the gRPC admin service without TLS on a non-loopback host.
+   * Strongly discouraged — only for isolated/trusted networks.
+   */
+  grpcAllowInsecureRemote?: boolean;
   /** Configuration options for the Bloom filter. */
   filter: FilterConfig;
 }
@@ -64,6 +77,15 @@ export interface gRPCFunctions {
 }
 
 /**
+ * Shared promise guarding concurrent gRPC server initialization.
+ * The first `createRevoker({ grpcEnabled: true })` call starts the server;
+ * concurrent callers await the same initialization instead of racing
+ * `revokerStore.init()` (which would throw "already initialized").
+ * Reset to null when the server is stopped or when initialization fails.
+ */
+let grpcServerInitPromise: Promise<void> | null = null;
+
+/**
  * Revoker class to manage middleware and adding items to the Bloom filter.
  */
 export class Revoker {
@@ -73,6 +95,8 @@ export class Revoker {
   logger: GenericLogger;
   grpcEnabled: boolean;
   grpcPort: number;
+  grpcHost: string;
+  grpcAllowInsecureRemote: boolean;
   startServer: typeof startServer;
   stopServer: typeof stopServer;
   revokerStore: RevokerStoreType;
@@ -105,6 +129,8 @@ export class Revoker {
       opaqueHeader,
       grpcEnabled = false,
       grpcPort,
+      grpcHost = '127.0.0.1',
+      grpcAllowInsecureRemote = false,
       logger = console,
       filter,
     } = config;
@@ -112,7 +138,9 @@ export class Revoker {
     try {
       this.bloomFilterManager = new BloomFilterManager({ id, logger, ...filter });
     } catch (error) {
-      throw new InternalError(`Failed to initialize BloomFilterManager: ${error.message}`);
+      throw new InternalError(
+        `Failed to initialize BloomFilterManager: ${(error as Error).message}`
+      );
     }
 
     const throttleLog = throttle((message: string) => logger.info(message), 60000);
@@ -142,6 +170,8 @@ export class Revoker {
 
     this.grpcEnabled = grpcEnabled;
     this.grpcPort = grpcPort ? Number(grpcPort) : 0;
+    this.grpcHost = grpcHost;
+    this.grpcAllowInsecureRemote = grpcAllowInsecureRemote;
 
     this.startServer = startServerFn;
     this.stopServer = stopServerFn;
@@ -150,6 +180,11 @@ export class Revoker {
 
   /**
    * Initializes the grpc server.
+   *
+   * The server is a process-wide singleton: the first gRPC-enabled revoker
+   * starts it, and concurrent `createRevoker` calls share the same
+   * initialization promise instead of racing `revokerStore.init()`.
+   *
    * @returns The Revoker instance.
    * @throws {Error} If the gRPC server fails to start.
    */
@@ -158,18 +193,46 @@ export class Revoker {
       if (Revoker.grpcServerStarted) {
         this.logger.info('gRPC server is already started.');
         this.revokerStore.registerInstance(this);
-      } else {
-        this.logger.info(`Starting gRPC server with id: ${this.id}`);
-        try {
-          this.revokerStore.init();
-          await this.startServer(this.grpcPort, RevokerStore, this.logger);
-          this.revokerStore.registerInstance(this);
-          Revoker.grpcServerStarted = true;
-        } catch (error) {
-          this.destroy(); // Cleanup
-          this.logger.error(`Failed to start gRPC server: ${error.message}`); // double log ???
-          throw new Error(`Failed to start gRPC server: ${error.message}`);
+        return this;
+      }
+
+      this.logger.info(`Starting gRPC server with id: ${this.id}`);
+      try {
+        if (!grpcServerInitPromise) {
+          grpcServerInitPromise = (async () => {
+            this.revokerStore.init();
+            // Pass the (possibly injected) store — not the imported singleton —
+            // so gRPC handlers see the same instances as this revoker.
+            await this.startServer(this.grpcPort, this.revokerStore, this.logger, {
+              host: this.grpcHost,
+              allowInsecureRemote: this.grpcAllowInsecureRemote,
+            });
+            Revoker.grpcServerStarted = true;
+          })();
+          // Allow a later createRevoker() to retry after a failed bind.
+          grpcServerInitPromise.catch(() => {
+            grpcServerInitPromise = null;
+          });
         }
+        await grpcServerInitPromise;
+        this.revokerStore.registerInstance(this);
+      } catch (error) {
+        // The store was initialized but the server never started (e.g. port in
+        // use): clean it up so the next createRevoker() can start fresh instead
+        // of failing forever with "already initialized".
+        if (!Revoker.grpcServerStarted) {
+          try {
+            if (this.revokerStore.isEmpty()) {
+              this.revokerStore.destroy();
+            }
+          } catch {
+            // Store was never initialized — nothing to clean up.
+          }
+        }
+        await this.destroy(); // Cleanup
+        const message = (error as Error).message;
+        this.logger.error(`Failed to start gRPC server: ${message}`);
+        throw new Error(`Failed to start gRPC server: ${message}`);
       }
     }
     return this;
@@ -312,20 +375,41 @@ export class Revoker {
   }
 
   /**
+   * Unregisters this instance from the gRPC store and stops the gRPC server
+   * when the last instance leaves. Shared by `shutdown()` and `destroy()`.
+   */
+  async #cleanupGrpc(): Promise<void> {
+    if (this.grpcEnabled && Revoker.grpcServerStarted) {
+      this.revokerStore.unregisterInstance(this.id);
+      this.logger.info(`unregistering instance : ${this.id}`);
+      this.grpcEnabled = false;
+      if (this.revokerStore.isEmpty()) {
+        this.logger.info('Stopping gRPC server');
+        this.revokerStore.destroy();
+        await this.stopServer(this.logger);
+        Revoker.grpcServerStarted = false;
+        grpcServerInitPromise = null;
+      }
+    }
+  }
+
+  /**
    * Gracefully shuts down the revoker.
    *
    * Rejects new add() calls, waits for in-progress operations, flushes the
-   * write buffer if enabled, and destroys all resources.
+   * write buffer if enabled, destroys all resources, and unregisters the
+   * instance from the gRPC store (stopping the server if it was the last one).
    * Safe to call from a SIGTERM/SIGINT handler.
    */
   async shutdown(): Promise<void> {
-    if (!this.bloomFilterManager) {
+    if (this.bloomFilterManager) {
+      await this.bloomFilterManager.shutdown();
+      this.middleware = null;
+      this.bloomFilterManager = null;
+    } else {
       this.logger.warn('Bloom filter manager already destroyed, nothing to shut down.');
-      return;
     }
-    await this.bloomFilterManager.shutdown();
-    this.middleware = null;
-    this.bloomFilterManager = null;
+    await this.#cleanupGrpc();
   }
 
   /**
@@ -333,17 +417,7 @@ export class Revoker {
    */
   async destroy(): Promise<void> {
     try {
-      if (this.grpcEnabled && Revoker.grpcServerStarted) {
-        this.revokerStore.unregisterInstance(this.id);
-        this.logger.info(`unregistering instance : ${this.id}`);
-        this.grpcEnabled = false;
-        if (this.revokerStore.isEmpty()) {
-          this.logger.info('Stopping gRPC server');
-          this.revokerStore.destroy();
-          await this.stopServer(this.logger);
-          Revoker.grpcServerStarted = false;
-        }
-      }
+      await this.#cleanupGrpc();
       if (this.bloomFilterManager) {
         this.bloomFilterManager.destroy();
         this.middleware = null;
@@ -353,19 +427,18 @@ export class Revoker {
       }
     } catch (error) {
       this.logger.error('Error during Revoker destruction:', error);
-      throw new InternalError(`Failed to destroy Revoker: ${error.message}`);
+      throw new InternalError(`Failed to destroy Revoker: ${(error as Error).message}`);
     }
   }
 }
 
 /**
- * Creates a Revoker instance.
+ * Creates a Revoker instance — the main public entry point.
+ *
  * @param config - Configuration options.
- * @param grpcFunctions - Functions for gRPC server management.
- * This function is **exported for testing purposes only**. It is **not** part of the public
- * API and should not be used or modified in production.
+ * @param grpcFunctions - Optional dependency injection for gRPC server management (mostly for tests).
  * @returns The Revoker instance.
- * @throws {Error} If the configuration is invalid.
+ * @throws {ValidationError} If the configuration is invalid.
  * @throws {Error} If the gRPC server fails to start.
  */
 export async function createRevoker(
@@ -373,5 +446,22 @@ export async function createRevoker(
   grpcFunctions: gRPCFunctions = {}
 ): Promise<Revoker> {
   const revoker = new Revoker(config, grpcFunctions);
-  return await revoker._grpcInit();
+  return revoker._grpcInit();
 }
+
+// Public types and errors, so consumers can name return types and catch typed
+// errors without deep imports.
+export type {
+  GenericLogger,
+  HealthCheckComponent,
+  HealthStatus,
+  RevokerStore as RevokerStoreType,
+} from './types.js';
+export type {
+  BloomFilterOptions,
+  Configuration,
+  EstimatedMetrics,
+  Metrics,
+} from './Bloom-filter-manager.js';
+export type { JWTPayload } from './createMiddlewares.js';
+export { ValidationError, InternalError } from './errors.js';

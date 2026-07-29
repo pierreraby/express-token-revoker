@@ -1,5 +1,5 @@
 import { vi, type Mock } from 'vitest';
-import type { GenericLogger } from '../../dist/types.js';
+import type { GenericLogger } from '../../src/types.js';
 
 /**
  * A GenericLogger where every method is a Vitest mock, so tests can both pass

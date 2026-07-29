@@ -3,5 +3,5 @@ node_modules/
 backup/
 coverage/
 build/
-dist/mytest.js.pi-subagents/
+*.bak
 .pi-subagents/
