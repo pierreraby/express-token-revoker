@@ -37,9 +37,9 @@ const revoker = await createRevoker({
   payloadKey: 'token',           // req[payloadKey] holds the decoded JWT
   logger: console,
   filter: {
-    numItems: 1_000_000,         // expected tokens before rotation
+    numItems: 1_000_000,         // max revoked tokens expected per rotation window
     fpRate: 0.000_001,           // 1 in a million false positive
-    rotateTime: 10 * 60_000,     // rotate every 10 minutes
+    rotateTime: 10 * 60_000,     // time-based rotation window (= token validity in JWT mode)
     backup: true,                // persist to disk for crash recovery
     backupRatioTime: 2,          // full backup every rotateTime / 2
   },
@@ -110,9 +110,9 @@ const revoker = await createRevoker({
 
 | Field | Type | Default | Description |
 | ------- | ------ | --------- | ------------- |
-| `numItems` | `number` | — | Expected number of tokens before rotation (max 100,000,000) |
+| `numItems` | `number` | — | Max revoked tokens expected within one `rotateTime` window. Sizes the filter so the FPR stays below `fpRate` for a full window (max 100,000,000) |
 | `fpRate` | `number` | — | Target false-positive rate — exclusive range (0, 1) |
-| `rotateTime` | `number` | — | Rotation interval in milliseconds |
+| `rotateTime` | `number` | — | Time-based rotation interval in milliseconds. In JWT mode, set this equal to the token validity duration (see [Rotation and token validity](#rotation-and-token-validity)) |
 | `backup` | `boolean` | `false` | Enable disk persistence |
 | `backupDir` | `string` | `./backup` | Directory for backup files |
 | `backupRatioTime` | `number` | — | Full backup every `rotateTime / backupRatioTime` ms |
@@ -210,6 +210,20 @@ const metrics = revoker.getMetrics();
 ```
 
 ## Reliability model
+
+### Rotation and token validity
+
+Rotation is **time-driven**, not count-driven: every `rotateTime` milliseconds the `current` filter becomes `previous` and a fresh `current` is created — regardless of how many tokens were revoked. `numItems` does **not** trigger rotation; it sizes the filter so that the revocations expected within a single `rotateTime` window keep the false-positive rate below `fpRate`.
+
+**In JWT mode, set `rotateTime` equal to the token validity duration (TTL).** This is the natural setting, and it guarantees correctness:
+
+- A token revoked during a window lands in `current`.
+- At the next rotation it moves to `previous`, where it is **still checked** (`has()` tests both filters) for the following window.
+- A token revoked just before a rotation is promoted to `previous` immediately, stays under scrutiny for one more window, and is already expired by the next rotation (validity == `rotateTime`) — so purging it then is safe.
+
+The result: every revoked token is checked for at least its remaining validity, expired tokens are evicted after at most two windows, and memory stays bounded.
+
+> If a periodic or rotation-time backup fails (e.g. disk unavailable), rotation **continues in memory** and a warning is logged — already-revoked tokens stay enforced and new revocations still land in the in-memory filter. `healthCheck()` reports `storage: unhealthy` until persistence recovers. See [Failure modes](#failure-modes) for the full matrix, including `add()` behavior when the write-ahead log itself fails.
 
 ### Crash recovery
 
