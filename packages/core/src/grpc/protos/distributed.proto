@@ -1,0 +1,225 @@
+syntax = "proto3";
+
+package revoker.distributed;
+
+// ============================================================================
+// Distributed revocation wire protocol (v1).
+//
+// This file DEFINES the protocol only. It is shipped by packages/core so
+// that every package (coordinator, node, clients) can load a single
+// canonical definition, but core implements NONE of this service: core
+// stays distribution-agnostic. The coordinator lives in packages/server,
+// participants in packages/node.
+//
+// Replication model — total-ordered event log: the coordinator assigns a
+// monotonic LSN (Log Sequence Number) to every event. Two event types are
+// interleaved in one ordered sequence (WalEntry, Rotate), plus control
+// events (Keepalive, ResnapshotRequired). Nodes apply events sequentially
+// in received order; no per-entry routing logic is needed on the happy path.
+// ============================================================================
+
+service RevokerCoordinator {
+  // Admin entry point: revoke a token. Canonical-first ordering: the entry
+  // is appended to the canonical WAL (LSN assigned) BEFORE being applied to
+  // the coordinator's in-memory filter.
+  rpc Add (DistAddRequest) returns (DistAddResponse) {}
+
+  // Check revocation against the coordinator's own filter (admin/debug/
+  // consistency checks only — nodes never call this on the request path).
+  rpc Has (DistHasRequest) returns (DistHasResponse) {}
+
+  // Coordinator metrics + cluster-wide state (generation, last LSN).
+  rpc GetMetrics (DistGetMetricsRequest) returns (DistGetMetricsResponse) {}
+
+  // Node bootstrap: consistent snapshot of the coordinator state at the
+  // point of its last backup. The returned lastBackupLsn is the LSN from
+  // which the node must Subscribe to reach the exact current state.
+  rpc GetSnapshot (GetSnapshotRequest) returns (GetSnapshotResponse) {}
+
+  // Primary replication channel: server-streaming. Sends the canonical
+  // backlog (in LSN order, starting just after lastLsn) then live events,
+  // plus periodic keepalives. At-least-once delivery; apply is idempotent.
+  rpc Subscribe (SubscribeRequest) returns (stream StreamEvent) {}
+
+  // Degraded-mode fallback: unary catch-up for a node whose stream is
+  // broken. Returns the same event types as Subscribe.
+  rpc PollDeltas (PollDeltasRequest) returns (PollDeltasResponse) {}
+
+  // List registered nodes and their replication state (admin/observability).
+  rpc ListNodes (ListNodesRequest) returns (ListNodesResponse) {}
+}
+
+// ----------------------------------------------------------------------------
+// Replication events
+// ----------------------------------------------------------------------------
+
+// One event on the ordered replication stream. The oneof discriminates the
+// event type; a node MUST apply events in the exact order received.
+message StreamEvent {
+  oneof event {
+    WalEntry entry = 1;
+    Rotate rotate = 2;
+    Keepalive keepalive = 3;
+    ResnapshotRequired resnapshot = 4;
+  }
+}
+
+// A single revocation to apply.
+// SECURITY: `item` must NEVER be logged by receivers — it is a token or a
+// token-derived claim key. Use the same redaction policy as core
+// (SHA256 prefix) if a fingerprint is needed in logs.
+message WalEntry {
+  int64 lsn = 1;
+  int32 generation = 2;
+  string item = 3;
+}
+
+// Coordinated rotation: every node must rotate NOW. The coordinator owns
+// the rotation schedule; nodes rotate only on this event (self-rotation
+// exists only as a degraded-mode safety timeout). Entries received with a
+// matching generation are applied into the node's current filter.
+message Rotate {
+  int64 lsn = 1;
+  int32 generation = 2;
+}
+
+// Stream liveness + lag hint. Detects zombie connections: receivers force
+// a reconnect after several missed keepalives.
+message Keepalive {
+  int64 coordinatorLastLsn = 1;
+  int32 generation = 2;
+}
+
+// The coordinator can no longer serve the requested backlog (retention
+// floor exceeded). The node MUST discard local state and rebootstrap via
+// GetSnapshot. Never served silently.
+message ResnapshotRequired {
+  int32 generation = 1;
+}
+
+// ----------------------------------------------------------------------------
+// Subscribe / PollDeltas (replication pull)
+// ----------------------------------------------------------------------------
+
+message SubscribeRequest {
+  string nodeId = 1;
+  // Resume after this LSN; the coordinator streams events starting at
+  // lastLsn + 1. A node that just installed a snapshot passes the
+  // snapshot's lastBackupLsn.
+  int64 lastLsn = 2;
+}
+
+message PollDeltasRequest {
+  string nodeId = 1;
+  // Resume after this LSN (same semantics as SubscribeRequest.lastLsn).
+  int64 fromLsn = 2;
+  // Upper bound on the number of events returned per call (bounded
+  // response size).
+  int32 maxEvents = 3;
+}
+
+message PollDeltasResponse {
+  repeated StreamEvent events = 1;
+  // True when more events are available beyond this page: keep polling
+  // with fromLsn = last applied LSN until false.
+  bool moreAvailable = 2;
+}
+
+// ----------------------------------------------------------------------------
+// Admin (canonical-first revocation + inspection)
+// ----------------------------------------------------------------------------
+
+message DistAddRequest {
+  // Originating admin caller / instance name (audit/traceability).
+  string nodeId = 1;
+  // The token or claim key to revoke. Same validation rules as core add():
+  // non-empty, no line breaks / null characters, max 4096 chars.
+  // SECURITY: must never be logged raw by any party.
+  string item = 2;
+}
+
+message DistAddResponse {
+  bool success = 1;
+  string message = 2;
+  // LSN assigned to the entry (or to its tombstone if the coordinator
+  // rejected the local apply, e.g. saturation). Present when known.
+  int64 lsn = 3;
+}
+
+message DistHasRequest {
+  string nodeId = 1;
+  // SECURITY: must never be logged raw by any party.
+  string item = 2;
+}
+
+message DistHasResponse {
+  bool exists = 1;
+}
+
+message DistGetMetricsRequest {
+  string nodeId = 1;
+}
+
+message DistGetMetricsResponse {
+  // Mirrors core EstimatedMetrics: fractional Bloom-filter cardinality
+  // estimates.
+  double currentCount = 1;
+  double previousCount = 2;
+  float currentFpRate = 3;
+  float previousFpRate = 4;
+  // Mirrors core Configuration.
+  int32 numItems = 5;
+  float fpRate = 6;
+  int32 rotateTime = 7;
+  // Coordinator cluster state.
+  int32 generation = 8;
+  int64 lastLsn = 9;
+}
+
+// ----------------------------------------------------------------------------
+// Snapshot (node bootstrap)
+// ----------------------------------------------------------------------------
+
+message GetSnapshotRequest {
+  string nodeId = 1;
+}
+
+message GetSnapshotResponse {
+  // Serialized filter buckets — the raw bytes core already writes to its
+  // .blob files (Int32Array.buffer). Empty when the coordinator has not
+  // produced a backup yet (node then reconstructs from the tail only).
+  bytes currentBlob = 1;
+  bytes previousBlob = 2;
+  // Consistency point of this snapshot.
+  int32 generation = 3;
+  // Every canonical entry with LSN <= lastBackupLsn is reflected in the
+  // blobs above; Subscribe(lastBackupLsn) replays the rest for an exact
+  // state.
+  int64 lastBackupLsn = 4;
+  // Geometry the node MUST validate against its own config before
+  // accepting the snapshot (mismatch => refuse to join).
+  int32 numItems = 5;
+  double fpRate = 6;
+  int32 k = 7;
+  // Coordinator's rotateTime (ms). Nodes derive their own safety-timeout
+  // from this value rather than trusting their local setting.
+  int32 rotateTime = 8;
+}
+
+// ----------------------------------------------------------------------------
+// Cluster observability
+// ----------------------------------------------------------------------------
+
+message ListNodesRequest {}
+
+message ListNodeInfo {
+  string nodeId = 1;
+  int64 lastLsn = 2;
+  // Epoch milliseconds of the last observed activity for this node.
+  int64 lastSeenMs = 3;
+  bool connected = 4;
+}
+
+message ListNodesResponse {
+  repeated ListNodeInfo nodes = 1;
+}
