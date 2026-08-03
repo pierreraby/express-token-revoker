@@ -8,7 +8,8 @@
     ".": {
       "types": "./build/index.d.ts",
       "import": "./build/index.js"
-    }
+    },
+    "./grpc/protos/*": "./build/grpc/protos/*"
   },
   "files": [
     "build"

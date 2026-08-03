@@ -28,6 +28,12 @@ export interface FilterConfig {
   bufferEnabled?: boolean;
   /** Maximum number of tokens to hold in the write buffer before rejecting new additions. Defaults to numItems * 2. */
   bufferMaxSize?: number;
+  /**
+   * Optional observer invoked after each successful filter rotation.
+   * Called after the rotation mutex has been released; errors it throws are
+   * swallowed (and logged) so the hook can never break the rotation cycle.
+   */
+  onRotation?: () => void;
 }
 
 interface ConfigBase {
@@ -291,6 +297,66 @@ export class Revoker {
       return this.bloomFilterManager.has(item);
     } catch (error) {
       this.logger.error('Error in Revoker.has:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Applies a replicated revocation entry to the Bloom filter.
+   *
+   * Replication apply seam: same input validation and WAL-before-memory
+   * ordering as add(), but saturation warns instead of throwing (blocking a
+   * replicated entry would silently diverge this replica).
+   *
+   * Note: like the other passthroughs, this method throws when gRPC is
+   * enabled. There is no gRPC equivalent in v1 — the guard is kept for API
+   * consistency and will be lifted once a gRPC method exists.
+   *
+   * @param filterItem - The replicated entry to apply.
+   * @throws {Error} If the item is invalid or the manager is not initialized.
+   */
+  applyEntry(filterItem: string): void {
+    if (this.grpcEnabled) {
+      throw new Error('gRPC is enabled, use the gRPC method instead');
+    }
+
+    if (!this.bloomFilterManager) {
+      throw new Error('Bloom filter manager not initialized');
+    }
+
+    try {
+      this.bloomFilterManager.applyEntry(filterItem);
+    } catch (error) {
+      this.logger.error('Error in Revoker.applyEntry:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Rotates the Bloom filters immediately, outside the periodic schedule.
+   *
+   * The rotation clock is reset: the next automatic rotation happens a full
+   * `rotateTime` after this manual rotation.
+   *
+   * Note: like the other passthroughs, this method throws when gRPC is
+   * enabled. There is no gRPC equivalent in v1 — the guard is kept for API
+   * consistency and will be lifted once a gRPC method exists.
+   *
+   * @throws {Error} If the Bloom filter manager is not initialized.
+   */
+  async rotateOnDemand(): Promise<void> {
+    if (this.grpcEnabled) {
+      throw new Error('gRPC is enabled, use the gRPC method instead');
+    }
+
+    if (!this.bloomFilterManager) {
+      throw new Error('Bloom filter manager not initialized');
+    }
+
+    try {
+      await this.bloomFilterManager.rotateOnDemand();
+    } catch (error) {
+      this.logger.error('Error in Revoker.rotateOnDemand:', error);
       throw error;
     }
   }

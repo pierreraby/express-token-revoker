@@ -110,6 +110,11 @@ const filterInputSchema = Joi.object({
     .description(
       'Maximum number of tokens to hold in the write buffer before rejecting new additions'
     ),
+  onRotation: Joi.function()
+    .optional()
+    .description(
+      'Observer invoked after each successful rotation — errors are swallowed so the hook can never break rotation'
+    ),
 });
 
 export { revokerInputSchema, filterInputSchema };

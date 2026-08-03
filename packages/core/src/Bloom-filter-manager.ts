@@ -5,6 +5,7 @@ import { Mutex } from 'async-mutex';
 import { filterInputSchema } from './Inputs-validation.js';
 import { BloomFilterFactory } from './BloomFilterFactory.js';
 import { BloomFilterBackupManager } from './BloomFilterBackupManager.js';
+import throttle from 'throttleit';
 import type { GenericLogger, HealthStatus } from './types.js';
 
 /**
@@ -29,6 +30,12 @@ export interface BloomFilterOptions {
   bufferEnabled?: boolean;
   /** Maximum number of tokens to hold in the write buffer before rejecting new additions. Defaults to numItems * 2. */
   bufferMaxSize?: number;
+  /**
+   * Optional observer invoked after each successful rotation.
+   * Called after the rotation mutex has been released; errors it throws are
+   * swallowed (and logged) so the hook can never break the rotation cycle.
+   */
+  onRotation?: () => void;
   /** Any logger implementing the basic logging methods */
   logger: GenericLogger;
 }
@@ -76,6 +83,10 @@ export interface Metrics {
     rotations: number;
     /** Failed rotation cycles (after all retries). */
     rotationsFailed: number;
+    /** Successful applyEntry() calls (replication apply path). */
+    applied: number;
+    /** applyEntry() calls that hit critical saturation (warned, not blocked). */
+    appliedSaturationWarned: number;
   };
 }
 
@@ -111,7 +122,13 @@ export class BloomFilterManager {
     hits: 0,
     rotations: 0,
     rotationsFailed: 0,
+    applied: 0,
+    appliedSaturationWarned: 0,
   };
+  /** Optional observer invoked after each successful rotation. */
+  #onRotation: (() => void) | undefined;
+  /** Throttled warn for applyEntry() saturation (1/min) to avoid log floods. */
+  #throttledApplySaturationWarn: (message: string) => void;
 
   /**
    * Creates an instance of BloomFilterManager.
@@ -136,6 +153,11 @@ export class BloomFilterManager {
     this.logger = logger;
     this.hasRotated = false;
     this.mutex = new Mutex();
+    this.#onRotation = options.onRotation;
+    this.#throttledApplySaturationWarn = throttle(
+      (message: string) => this.logger.warn(message),
+      60000
+    );
 
     this.logger.info(
       `Initializing BloomFilterManager with numItems=${this.numItems}, fpRate=${this.fpRate}, rotateTime=${this.rotateTime}`
@@ -205,6 +227,7 @@ export class BloomFilterManager {
       try {
         await this.#rotate();
         this.#counters.rotations++;
+        this.#notifyRotation();
         return;
       } catch (error) {
         this.logger.error(`Rotation failed (attempt ${i + 1}/${maxRetries}):`, error);
@@ -218,6 +241,59 @@ export class BloomFilterManager {
     this.logger.error(
       `Max retries reached for this rotation cycle. Will retry on next interval in ${this.rotateTime}ms.`
     );
+  }
+
+  /**
+   * Notifies the optional onRotation observer after a successful rotation.
+   *
+   * Called after #rotate() has returned, i.e. after the rotation mutex has
+   * been released, so the hook never runs inside the mutex-held section.
+   * Hook errors are swallowed (and logged) so an observer can never break
+   * the rotation cycle. If a hook happens to return a Promise, its
+   * rejection is caught as well so it can never become unhandled.
+   */
+  #notifyRotation(): void {
+    if (!this.#onRotation) {
+      return;
+    }
+    try {
+      const result = this.#onRotation() as unknown;
+      if (result instanceof Promise) {
+        result.catch((hookError: unknown) => {
+          this.logger.error('onRotation hook error (ignored):', hookError);
+        });
+      }
+    } catch (hookError) {
+      this.logger.error('onRotation hook error (ignored):', hookError);
+    }
+  }
+
+  /**
+   * Rotates the filters immediately, outside the periodic schedule.
+   *
+   * The rotation interval is stopped, a rotation is performed, and the
+   * interval is restarted: restarting resets the rotation clock, so the next
+   * automatic rotation happens a full `rotateTime` after this manual one.
+   * This is the seam an external rotation owner (e.g. a coordinator owning
+   * the rotation schedule) uses to keep every replica on the same window.
+   *
+   * Concurrent automatic rotations are safe: both paths serialize on the
+   * same mutex, so at most one rotation runs at a time.
+   *
+   * @throws {InternalError} If the manager is shutting down.
+   */
+  async rotateOnDemand(): Promise<void> {
+    if (this.#shuttingDown) {
+      throw new InternalError('Cannot rotate on demand: revoker is shutting down.');
+    }
+    this.#stopRotationInterval();
+    try {
+      await this.#rotateWithRetry();
+    } finally {
+      // Always restart the interval: the rotation schedule must never be
+      // permanently stopped.
+      this.#startRotationInterval();
+    }
   }
 
   /**
@@ -326,6 +402,70 @@ export class BloomFilterManager {
     }
     this.#currentInsertions++;
     this.#counters.addSucceeded++;
+  }
+
+  /**
+   * Applies a replicated revocation entry (replication apply seam).
+   *
+   * Like add(), the entry is validated and persisted, but saturation does
+   * NOT block the apply: blocking a replicated entry would silently diverge
+   * this replica from the source of truth and could introduce false
+   * negatives. Saturation only warns (rate-limited) and counts, so operators
+   * can react through health checks and metrics.
+   *
+   * IMPORTANT — WAL-before-memory invariant: the entry is appended to the
+   * write-ahead log (backupManager.backupItem) BEFORE the in-memory filter
+   * is updated, exactly like add(). A crash can therefore never lose a
+   * replicated revocation: the WAL replay on restore re-applies it.
+   *
+   * Input validation mirrors add() as defense-in-depth against a compromised
+   * or buggy replication source (WAL poisoning, oversized entries).
+   *
+   * @param filterItem - The replicated entry to apply.
+   * @throws {ValidationError} If filterItem is invalid.
+   * @throws {InternalError} If the manager is shutting down or persistence fails.
+   */
+  applyEntry(filterItem: string): void {
+    if (typeof filterItem !== 'string' || filterItem.trim() === '') {
+      throw new ValidationError('Value must be a non-empty string');
+    }
+
+    // The write-ahead log stores one token per line: line breaks would split
+    // the token and poison the restore (attacker-chosen fragments revoked).
+    if (/[\r\n\0]/.test(filterItem)) {
+      throw new ValidationError('Value must not contain line breaks or null characters');
+    }
+
+    if (filterItem.length > BloomFilterManager.MAX_ITEM_LENGTH) {
+      throw new ValidationError(
+        `Value exceeds maximum length of ${BloomFilterManager.MAX_ITEM_LENGTH} characters`
+      );
+    }
+
+    if (this.#shuttingDown) {
+      throw new InternalError('Cannot apply entry: revoker is shutting down.');
+    }
+
+    // Saturation warns but never blocks: refusing a replicated entry would
+    // silently diverge this replica (global false-negative risk).
+    if (this.#currentInsertions > this.numItems * BloomFilterManager.MAX_SATURATION_RATIO) {
+      this.#counters.appliedSaturationWarned++;
+      this.#throttledApplySaturationWarn(
+        `Applying entry on critically saturated filter ` +
+          `(${this.#currentInsertions} insertions, ${this.numItems} capacity). ` +
+          `Entry applied; FPR degraded. Check health endpoint.`
+      );
+    }
+
+    try {
+      this.backupManager?.backupItem(filterItem);
+      this.current?.add(filterItem);
+    } catch (error) {
+      const err = error as Error;
+      throw new InternalError(`Failed to apply entry to Bloom filter: ${err.message}`);
+    }
+    this.#currentInsertions++;
+    this.#counters.applied++;
   }
 
   /**
@@ -460,6 +600,8 @@ export class BloomFilterManager {
         hits: 0,
         rotations: 0,
         rotationsFailed: 0,
+        applied: 0,
+        appliedSaturationWarned: 0,
       };
       this.#startRotationInterval();
       this.logger.debug('Bloom filters reset');
