@@ -18,7 +18,7 @@ Toute l'architecture se résume à une question : **comment rendre cette fenêtr
 C'est l'extension la plus naturelle de l'existant.
 
 ```
-                    ┌─────────────────────┐
+                    ┌──────────────────────┐
                     │   Coordinator        │
                     │   (packages/server)  │
                     │                      │
