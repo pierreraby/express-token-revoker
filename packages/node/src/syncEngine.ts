@@ -254,8 +254,9 @@ export class SyncEngine {
         `Node ${this.#options.nodeId}: replication stream established at lsn ${this.#lastAppliedLsn}`
       );
       stream.on('data', (event) => {
-        // Any event (entries, rotations, keepalives) proves liveness.
-        this.#lastStreamActivityAt = Date.now();
+        // Liveness is stamped at APPLY time (end of #applyEvent), not on
+        // arrival: a blocked apply chain (e.g. hung disk fsync) must never
+        // be masked by keepalives that keep arriving but never apply.
         void this.#enqueueApply(event);
       });
       stream.on('error', (error) => {
@@ -319,11 +320,13 @@ export class SyncEngine {
   }
 
   /**
-   * Stalled-stream watchdog: while streaming, at least one event must
-   * arrive within MISSED_KEEPALIVES × keepaliveIntervalMs (the coordinator
+   * Stalled-stream watchdog: while streaming, at least one event must be
+   * APPLIED within MISSED_KEEPALIVES × keepaliveIntervalMs (the coordinator
    * sends keepalives unconditionally, so silence means the stream is
-   * stalled-but-open). A stalled stream is treated exactly like a stream
-   * failure — fail-closed, never a silent degraded node.
+   * stalled-but-open OR the apply chain is blocked). A stalled stream is
+   * treated exactly like a stream failure — fail-closed, never a silent
+   * degraded node. The stamp lives at the end of #applyEvent, so a chain
+   * blocked on a hung disk cannot be masked by arriving keepalives.
    */
   #startKeepaliveWatchdog(): void {
     this.#stopKeepaliveWatchdog();
@@ -429,9 +432,11 @@ export class SyncEngine {
       return;
     }
     if (kind === 'keepalive') {
-      // Liveness only — the watchdog consumes the arrival; the owner
-      // consumes the delivery (post-backlog catch-up marker).
+      // Liveness only — the owner consumes the delivery (post-backlog
+      // catch-up marker). Stamping here (chain drained) is what makes the
+      // stalled-stream watchdog measure APPLY progress, not arrival.
       this.#options.onKeepaliveReceived?.();
+      this.#lastStreamActivityAt = Date.now();
       return;
     }
     if (kind === 'resnapshot') {
@@ -514,6 +519,10 @@ export class SyncEngine {
       return;
     }
     this.#lastAppliedLsn = lsn;
+    // Chain drained — the event is fully applied and persisted. This is
+    // the liveness stamp the stalled-stream watchdog consumes (see the
+    // data handler: arrival alone never proves progress).
+    this.#lastStreamActivityAt = Date.now();
   }
 
   /** Fires the rebootstrap callback once and stops all engine activity. */

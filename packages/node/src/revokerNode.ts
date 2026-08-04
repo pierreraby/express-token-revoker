@@ -89,9 +89,12 @@ export interface NodeHealthStatus {
  *   coordinated Rotate event in that window means core's own timer fired
  *   (coordinator down OR stream stalled) ⇒ the node marks itself dirty
  *   (persisted, so a restart re-bootstraps too) and IMMEDIATELY schedules a
- *   snapshot rebootstrap — fail-closed: a self-rotation can diverge from
- *   the coordinator's rotation schedule, so the node never keeps serving
- *   incrementally on top of it.
+ *   snapshot rebootstrap. Until that rebootstrap succeeds, the node keeps
+ *   serving its self-rotated local filter — safe because the self-rotation
+ *   trails the coordinator's eviction (it fires only after the safety
+ *   factor × rotateTime with no coordinated event), so the served filter
+ *   never drops coverage the coordinator still holds. Once the rebootstrap
+ *   succeeds, the exact coordinator state replaces the self-rotated one.
  * - **Never drop a delta**: LSN gaps, generation mismatches or
  *   `ResnapshotRequired` trigger a loud rebootstrap from the snapshot.
  *
@@ -266,7 +269,10 @@ export class RevokerNode {
     }
 
     const sync: SyncHealthComponent = {
-      healthy: connected && !this.#dirty,
+      // Fail-closed visibility: while the post-bootstrap catch-up gate is
+      // armed, every check throws — the node must NOT report healthy (an
+      // LB would keep routing to a 500ing node).
+      healthy: connected && !this.#dirty && !this.#catchingUp,
       error: syncError,
       connected,
       mode,

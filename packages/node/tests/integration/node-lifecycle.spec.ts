@@ -112,7 +112,9 @@ describe('Node lifecycle (integration, real coordinator, port 0)', () => {
   };
 
   const waitForStreaming = async (node: RevokerNode): Promise<void> => {
-    await vi.waitFor(() => expect(node.healthCheck().checks.sync.connected).toBe(true), {
+    // Connected AND fail-closed gate released (first post-drain keepalive
+    // applied): healthy is the semantic "caught up and serving" signal.
+    await vi.waitFor(() => expect(node.healthCheck().checks.sync.healthy).toBe(true), {
       timeout: 8000,
     });
   };

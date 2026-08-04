@@ -254,6 +254,42 @@ describe('SyncEngine event application', () => {
     });
   });
 
+  it('a blocked apply chain is NOT masked by arriving keepalives — the watchdog still fires', async () => {
+    const streams: FakeStream[] = [];
+    harness = makeHarness({
+      keepaliveIntervalMs: 20,
+      baseReconnectDelayMs: 500,
+      maxReconnectDelayMs: 1000,
+      // A coordinated rotation whose rotateOnDemand never resolves blocks
+      // the apply chain (e.g. a hung async disk op inside the core
+      // rotation).
+      rotateImpl: () => new Promise(() => {}),
+      subscribeImpl: async () => {
+        const stream = new FakeStream();
+        streams.push(stream);
+        return stream as SyncSubscription;
+      },
+    });
+    harness.engine.start();
+    await vi.waitFor(() => expect(harness?.engine.connected).toBe(true));
+
+    // A rotate event blocks the chain at generation 1.
+    harness.stream.emit('data', rotate(1, 1));
+
+    // Keepalives keep ARRIVING (the stream is not silent). Liveness is
+    // stamped at APPLY time, so the blocked chain must still trip the
+    // watchdog — arrival-only liveness would mask it forever.
+    for (let i = 0; i < 8; i++) {
+      harness.stream.emit('data', keepalive(String(i), 0));
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    }
+
+    await vi.waitFor(() => expect(harness?.engine.mode).toBe('reconnecting'), {
+      timeout: 3000,
+    });
+    expect(streams[0].cancelled).toBe(true);
+  });
+
   it('an LSN gap triggers rebootstrap and does NOT apply the event', async () => {
     harness = makeHarness();
     harness.engine.start();
