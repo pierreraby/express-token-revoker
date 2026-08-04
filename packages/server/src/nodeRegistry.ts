@@ -1,4 +1,4 @@
-import { ValidationError, InternalError } from 'express-token-revoker';
+import { InternalError, ValidationError } from 'express-token-revoker';
 
 /**
  * Opaque handle the gRPC server uses to deliver ordered events to one node.

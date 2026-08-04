@@ -321,9 +321,7 @@ export class SyncEngine {
       }
     } catch (error) {
       // Coordinator still down — stay degraded, keep trying.
-      this.#logger.debug(
-        `Node ${this.#options.nodeId}: poll failed: ${(error as Error).message}`
-      );
+      this.#logger.debug(`Node ${this.#options.nodeId}: poll failed: ${(error as Error).message}`);
     } finally {
       this.#polling = false;
     }
@@ -372,9 +370,7 @@ export class SyncEngine {
       return; // idempotent redelivery (at-least-once)
     }
     if (lsn !== this.#lastAppliedLsn + 1) {
-      this.#rebootstrap(
-        `LSN gap detected: expected ${this.#lastAppliedLsn + 1}, got ${lsn}`
-      );
+      this.#rebootstrap(`LSN gap detected: expected ${this.#lastAppliedLsn + 1}, got ${lsn}`);
       return;
     }
 

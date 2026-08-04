@@ -1,12 +1,12 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createCoordinator, type CoordinatorHandle } from '@express-token-revoker/server';
+import { type CoordinatorHandle, createCoordinator } from '@express-token-revoker/server';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CoordinatorClient,
-  createRevokerNode,
   type CoordinatorClientLike,
+  createRevokerNode,
   type RevokerNode,
   type RevokerNodeConfig,
 } from '../../src/index.js';
@@ -67,6 +67,9 @@ describe('Node lifecycle (integration, real coordinator, port 0)', () => {
       port: 0,
       backupDir: makeDir(),
       opaqueHeader: 'Authorization',
+      // Existing fast tests run the explicit dev-only mode (PD-1); the
+      // distributed/auth.spec.ts suite covers the TLS modes with fixtures.
+      auth: { mode: 'insecure' },
       filter: {
         numItems: 1000,
         fpRate: 0.0001,
@@ -85,6 +88,7 @@ describe('Node lifecycle (integration, real coordinator, port 0)', () => {
       logger: createMockLogger(),
       backupDir,
       opaqueHeader: 'Authorization',
+      auth: { mode: 'insecure' },
       pollIntervalMs: 200,
       safetyFactor: 2,
       filter: {

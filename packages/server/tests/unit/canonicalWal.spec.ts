@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { InternalError } from 'express-token-revoker';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CanonicalWal } from '../../src/canonicalWal.js';
 import { createMockLogger, type MockLogger } from '../helpers/mock-logger.js';
 

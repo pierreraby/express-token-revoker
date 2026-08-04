@@ -1,13 +1,15 @@
-import * as grpc from '@grpc/grpc-js';
-import * as protoLoader from '@grpc/proto-loader';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import * as grpc from '@grpc/grpc-js';
+import * as protoLoader from '@grpc/proto-loader';
 import { ValidationError } from 'express-token-revoker';
 import type { Coordinator } from './coordinator.js';
 import { itemValidationError } from './coordinator.js';
 import type { NodeConnection, NodeRegistry } from './nodeRegistry.js';
-import { idPattern } from './validation.js';
 import type { CanonicalEvent, GenericLogger, OutboundEvent } from './types.js';
+import { type AuthMode, type CoordinatorAuthConfig, idPattern } from './validation.js';
 
 /**
  * Max send/receive message size for the distributed service.
@@ -21,6 +23,23 @@ const DRAIN_BATCH_SIZE = 1000;
 
 /** Hard cap on events returned by a single PollDeltas call. */
 const MAX_POLL_EVENTS = 10_000;
+
+/**
+ * gRPC metadata key carrying the shared secret (PD-1 shared-secret mode:
+ * "API key over HTTPS" — one-way TLS + secret in metadata).
+ */
+export const SHARED_SECRET_METADATA_KEY = 'x-shared-secret';
+
+/**
+ * Timing-safe secret comparison. Both sides are hashed to a fixed 32-byte
+ * digest first, so timingSafeEqual always sees constant-length buffers and
+ * the comparison leaks neither length nor prefix information.
+ */
+function timingSafeSecretMatch(provided: string, expected: string): boolean {
+  const providedDigest = createHash('sha256').update(provided).digest();
+  const expectedDigest = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(providedDigest, expectedDigest);
+}
 
 /**
  * Resolves the canonical distributed.proto shipped by the core package.
@@ -158,9 +177,7 @@ class NodeConnectionImpl implements NodeConnection {
       return;
     }
     this.#chain = this.#chain.then(task).catch((error: unknown) => {
-      this.#logger.error(
-        `Node ${this.nodeId}: delivery task failed: ${(error as Error).message}`
-      );
+      this.#logger.error(`Node ${this.nodeId}: delivery task failed: ${(error as Error).message}`);
       this.close();
     });
   }
@@ -267,10 +284,11 @@ export interface DistributedServerOptions {
   /** Port (0 = ephemeral; the bound port is returned by start()). */
   port: number;
   /**
-   * Allow binding without TLS on a non-loopback host (PD-1 pending — v1
-   * default posture mirrors core: loopback only unless explicitly opted in).
+   * gRPC auth (PD-1). Defaults to `{ mode: 'insecure' }` at this low level
+   * (createCoordinator always passes the validated config); 'insecure'
+   * binds are loopback-only and log a loud startup warning.
    */
-  allowInsecure?: boolean;
+  auth?: CoordinatorAuthConfig;
   /** Interval between stream keepalives in ms. Defaults to 5000. */
   keepaliveIntervalMs?: number;
 }
@@ -294,6 +312,16 @@ export class DistributedServer {
     this.#logger = options.logger;
   }
 
+  /**
+   * Effective auth mode (PD-1). A PRESENT auth object defaults to
+   * shared-secret via Joi; a completely OMITTED auth block falls back to
+   * insecure (the pre-PD-1 loopback-only posture, loud warning) so legacy
+   * configs keep working instead of crashing on missing certs/secret.
+   */
+  get #authMode(): AuthMode {
+    return this.#options.auth?.mode ?? 'insecure';
+  }
+
   /** The port actually bound (useful with port 0). */
   get boundPort(): number {
     return this.#boundPort;
@@ -303,21 +331,37 @@ export class DistributedServer {
    * Starts the server and wires the coordinator's live-event listener to
    * this server's broadcast.
    *
-   * The service is unauthenticated: binding a non-loopback host without the
-   * explicit allowInsecure opt-in is refused, mirroring core's posture.
+   * Auth (PD-1): TLS modes bind with ServerCredentials.createSsl (mtls sets
+   * checkClientCertificate=true) and every call must carry the shared
+   * secret in gRPC metadata; 'insecure' is loopback-only and logs a loud
+   * startup warning. Credential files are read BEFORE any state is touched
+   * so an invalid auth config refuses to start cleanly (no partial state).
    *
    * @returns The bound port.
-   * @throws {ValidationError} On a refused non-loopback bind.
+   * @throws {ValidationError} On a refused bind or unreadable credentials.
    */
   async start(): Promise<number> {
     const host = this.#options.host ?? '127.0.0.1';
-    if (!isLoopbackHost(host) && !this.#options.allowInsecure) {
-      throw new ValidationError(
-        `Refusing to bind the unauthenticated coordinator service to non-loopback host "${host}". ` +
-          'The auth/TLS decision (PD-1) is pending: keep the bind loopback-only, or set ' +
-          'allowInsecure: true to accept the risk on an isolated/trusted network.'
+    const mode = this.#authMode;
+
+    if (mode === 'insecure') {
+      if (!isLoopbackHost(host)) {
+        throw new ValidationError(
+          `Refusing to bind the INSECURE coordinator service to non-loopback host "${host}". ` +
+            'Insecure mode is development-only (loopback binds); use shared-secret or mtls for real deployments.'
+        );
+      }
+      this.#logger.warn(
+        '==============================================================\n' +
+          '*** INSECURE MODE: the coordinator gRPC service runs with NO TLS and NO authentication. ***\n' +
+          '*** Development ONLY — never expose this configuration beyond loopback. ***\n' +
+          '=============================================================='
       );
     }
+
+    // Resolve credentials first: an invalid/incomplete auth config fails
+    // here, before registry init or listener wiring (no partial state).
+    const credentials = this.#buildCredentials();
 
     this.#options.registry.init();
     this.#options.coordinator.setListener((event) => this.#broadcast(event));
@@ -333,20 +377,71 @@ export class DistributedServer {
       if (!server) {
         return reject(new Error('Server is not initialized'));
       }
-      server.bindAsync(
-        `${host}:${this.#options.port}`,
-        grpc.ServerCredentials.createInsecure(),
-        (err, bindPort) => {
-          if (err) {
-            this.#logger.error(`Failed to bind coordinator on ${host}:${this.#options.port}: ${err.message}`);
-            return reject(err);
-          }
-          this.#boundPort = bindPort;
-          this.#logger.info(`Coordinator gRPC service listening on ${host}:${bindPort}`);
-          resolve(bindPort);
+      server.bindAsync(`${host}:${this.#options.port}`, credentials, (err, bindPort) => {
+        if (err) {
+          this.#logger.error(
+            `Failed to bind coordinator on ${host}:${this.#options.port}: ${err.message}`
+          );
+          return reject(err);
         }
-      );
+        this.#boundPort = bindPort;
+        this.#logger.info(`Coordinator gRPC service listening on ${host}:${bindPort}`);
+        resolve(bindPort);
+      });
     });
+  }
+
+  /**
+   * Builds the server credentials for the effective auth mode. Joi
+   * guarantees the paths exist for TLS modes; unreadable files still fail
+   * the start cleanly with a ValidationError.
+   */
+  #buildCredentials(): grpc.ServerCredentials {
+    const mode = this.#authMode;
+    if (mode === 'insecure') {
+      return grpc.ServerCredentials.createInsecure();
+    }
+    const auth = this.#options.auth as Required<
+      Pick<CoordinatorAuthConfig, 'caCertPath' | 'serverCertPath' | 'serverKeyPath' | 'secret'>
+    > &
+      CoordinatorAuthConfig;
+    try {
+      const ca = readFileSync(auth.caCertPath);
+      const certChain = readFileSync(auth.serverCertPath);
+      const privateKey = readFileSync(auth.serverKeyPath);
+      return grpc.ServerCredentials.createSsl(
+        ca,
+        [{ cert_chain: certChain, private_key: privateKey }],
+        mode === 'mtls' // checkClientCertificate: mtls demands client certs
+      );
+    } catch (error) {
+      throw new ValidationError(
+        `Failed to load coordinator TLS credentials (${(error as Error).message}). ` +
+          `Check auth.caCertPath/serverCertPath/serverKeyPath (mode: ${mode}).`
+      );
+    }
+  }
+
+  /**
+   * Metadata interceptor (PD-1 shared-secret check). Every TLS-mode call
+   * must carry the correct `x-shared-secret` metadata value; anything else
+   * is rejected with UNAUTHENTICATED before the handler runs. Comparison is
+   * timing-safe (sha256 digests, constant length).
+   */
+  #authenticate(
+    call: grpc.ServerUnaryCall<any, any> | grpc.ServerWritableStream<any, any>
+  ): grpc.ServiceError | null {
+    const expected = this.#options.auth?.secret ?? '';
+    const values = call.metadata.get(SHARED_SECRET_METADATA_KEY);
+    const provided = typeof values[0] === 'string' ? values[0] : '';
+    if (!provided || !timingSafeSecretMatch(provided, expected)) {
+      const error = new Error('Missing or invalid shared secret') as grpc.ServiceError;
+      error.code = grpc.status.UNAUTHENTICATED;
+      error.details = 'Missing or invalid shared secret';
+      error.metadata = new grpc.Metadata();
+      return error;
+    }
+    return null;
   }
 
   /**
@@ -379,14 +474,11 @@ export class DistributedServer {
       return nodeId;
     };
 
-    return {
+    const handlers: grpc.UntypedServiceImplementation = {
       /**
        * Admin revocation — canonical-first (see Coordinator.add).
        */
-      Add: (
-        call: grpc.ServerUnaryCall<any, any>,
-        callback: grpc.sendUnaryData<any>
-      ): void => {
+      Add: (call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>): void => {
         const item = call.request?.item;
         try {
           const result = coordinator.add(item);
@@ -409,10 +501,7 @@ export class DistributedServer {
       /**
        * Revocation check against the coordinator's own filter (admin/debug).
        */
-      Has: (
-        call: grpc.ServerUnaryCall<any, any>,
-        callback: grpc.sendUnaryData<any>
-      ): void => {
+      Has: (call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>): void => {
         const item = call.request?.item;
         const invalid = itemValidationError(item);
         if (invalid) {
@@ -636,6 +725,35 @@ export class DistributedServer {
         }
       },
     };
+
+    // PD-1 metadata interceptor: in TLS modes every call (unary AND
+    // server-streaming) must carry the correct shared secret in its
+    // metadata. The check runs before any handler logic.
+    if (this.#authMode === 'insecure') {
+      return handlers;
+    }
+    const guarded: grpc.UntypedServiceImplementation = {};
+    for (const [name, handler] of Object.entries(handlers)) {
+      guarded[name] = (call: any, callback?: any): void => {
+        const denied = this.#authenticate(call);
+        if (denied) {
+          if (callback) {
+            callback(denied);
+          } else {
+            // Server-streaming (Subscribe): surface the status like the
+            // in-handler rejections do.
+            call.emit('error', {
+              code: denied.code,
+              details: denied.details,
+              metadata: denied.metadata,
+            });
+          }
+          return;
+        }
+        (handler as (call: any, callback?: any) => void)(call, callback);
+      };
+    }
+    return guarded;
   }
 
   /**

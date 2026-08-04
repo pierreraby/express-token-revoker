@@ -1,4 +1,4 @@
-import { vi, type Mock } from 'vitest';
+import { type Mock, vi } from 'vitest';
 import type { GenericLogger } from '../../src/types.js';
 
 /**

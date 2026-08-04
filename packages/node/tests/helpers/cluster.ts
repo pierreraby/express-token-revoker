@@ -1,21 +1,23 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { expect, vi } from 'vitest';
+import type { CoordinatorAuthConfig } from '@express-token-revoker/server';
 import {
-  createCoordinator,
   type CoordinatorConfig,
   type CoordinatorHandle,
+  createCoordinator,
 } from '@express-token-revoker/server';
+import { expect, vi } from 'vitest';
 import {
-  createRevokerNode,
   type CoordinatorClientLike,
   type CoordinatorClientOptions,
+  createRevokerNode,
   type RevokerNode,
   type RevokerNodeConfig,
   type SyncSubscription,
   type WireStreamEvent,
 } from '../../src/index.js';
+import type { NodeAuthConfig } from '../../src/validation.js';
 import { createMockLogger } from './mock-logger.js';
 
 /**
@@ -62,6 +64,11 @@ export interface ClusterCoordinatorOptions {
   keepaliveIntervalMs?: number;
   numItems?: number;
   fpRate?: number;
+  /**
+   * gRPC auth (PD-1). Default: explicit `{ mode: 'insecure' }` to keep the
+   * cluster scenarios fast; the auth spec passes TLS fixtures instead.
+   */
+  auth?: CoordinatorAuthConfig;
 }
 
 /** Options for starting a node inside the cluster. */
@@ -71,6 +78,8 @@ export interface ClusterNodeOptions {
   backupDir?: string;
   safetyFactor?: number;
   pollIntervalMs?: number;
+  /** gRPC auth (PD-1). Defaults to the explicit insecure dev mode. */
+  auth?: NodeAuthConfig;
   /** DI wrapper factory — stream gate / corruptor / snapshot spy. */
   createClient?: (options: CoordinatorClientOptions) => CoordinatorClientLike;
 }
@@ -112,6 +121,7 @@ export class TestCluster {
       backupDir: options.backupDir ?? this.makeDir('etr-cluster-coord-'),
       keepaliveIntervalMs: options.keepaliveIntervalMs ?? 5_000,
       opaqueHeader: 'Authorization',
+      auth: options.auth ?? { mode: 'insecure' },
       filter: {
         numItems,
         fpRate,
@@ -134,12 +144,17 @@ export class TestCluster {
     options: ClusterNodeOptions = {}
   ): Promise<RevokerNode> {
     const geometry = this.#geometryByHandle.get(handle);
+    // TLS targets use the hostname form: grpc-js sets the TLS SNI servername
+    // from the authority and Node forbids an IP literal there (SAN fixtures
+    // cover DNS:localhost). Insecure mode keeps the numeric loopback.
+    const secure = options.auth !== undefined && options.auth.mode !== 'insecure';
     const config = {
       nodeId: options.nodeId ?? `node-${++this.#nodeSeq}`,
-      coordinatorAddress: `127.0.0.1:${handle.port}`,
+      coordinatorAddress: `${secure ? 'localhost' : '127.0.0.1'}:${handle.port}`,
       logger: createMockLogger(),
       backupDir: options.backupDir ?? this.makeDir('etr-cluster-node-'),
       opaqueHeader: 'Authorization',
+      auth: options.auth ?? { mode: 'insecure' },
       pollIntervalMs: options.pollIntervalMs ?? 200,
       safetyFactor: options.safetyFactor ?? 2,
       filter: {

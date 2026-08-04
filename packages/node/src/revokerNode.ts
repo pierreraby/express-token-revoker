@@ -1,21 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import type { RequestHandler } from 'express';
 import {
-  createRevoker,
-  InternalError,
-  ValidationError,
   type Config as CoreRevokerConfig,
+  createRevoker,
   type GenericLogger,
   type HealthCheckComponent,
   type HealthStatus,
+  InternalError,
   type Metrics,
   type Revoker,
+  ValidationError,
 } from 'express-token-revoker';
-import type { RequestHandler } from 'express';
-import {
-  CoordinatorClient,
-  type CoordinatorClientOptions,
-} from './coordinatorClient.js';
+import { CoordinatorClient, type CoordinatorClientOptions } from './coordinatorClient.js';
 import { StateFile } from './stateFile.js';
 import { SyncEngine, type SyncSubscription } from './syncEngine.js';
 import type { SnapshotResponse } from './types.js';
@@ -135,7 +132,7 @@ export class RevokerNode {
       address: this.#config.coordinatorAddress,
       nodeId: this.#config.nodeId,
       logger: this.#logger,
-      authMetadata: this.#config.authMetadata,
+      auth: this.#config.auth,
     };
     this.#client = this.#deps.createClient
       ? this.#deps.createClient(clientOptions)
@@ -434,9 +431,7 @@ export class RevokerNode {
     try {
       this.#revoker = await createRevoker(revokerConfig as CoreRevokerConfig);
     } catch (error) {
-      throw new InternalError(
-        `Failed to initialize the node revoker: ${(error as Error).message}`
-      );
+      throw new InternalError(`Failed to initialize the node revoker: ${(error as Error).message}`);
     }
   }
 
@@ -488,9 +483,7 @@ export class RevokerNode {
     if (this.#shuttingDown) {
       return;
     }
-    this.#logger.error(
-      `Node ${this.#config.nodeId}: ${reason} — scheduling a full rebootstrap`
-    );
+    this.#logger.error(`Node ${this.#config.nodeId}: ${reason} — scheduling a full rebootstrap`);
     this.#scheduleRebootstrap(0);
   }
 

@@ -1,5 +1,5 @@
-import Joi from 'joi';
 import type { GenericLogger } from 'express-token-revoker';
+import Joi from 'joi';
 
 /**
  * Identifier pattern shared with core: nodeId is interpolated into file
@@ -26,6 +26,40 @@ export interface NodeFilterConfig {
   backupRatioTime?: number;
 }
 
+/** Authentication modes for the coordinator↔node gRPC link (PD-1). */
+export type AuthMode = 'shared-secret' | 'mtls' | 'insecure';
+
+/** Minimum shared-secret length (Joi-enforced on both sides). */
+export const AUTH_SECRET_MIN_LENGTH = 16;
+
+/**
+ * Auth configuration for the node's coordinator client (PD-1). Mirrors the
+ * coordinator-side schema:
+ *
+ * - `shared-secret` (DEFAULT): one-way TLS + shared secret in gRPC
+ *   metadata. Requires `caCertPath` and `secret` (>= 16 chars).
+ * - `mtls`: adds the client certificate requirement (`clientCertPath` +
+ *   `clientKeyPath`) on top of the shared-secret requirements.
+ * - `insecure`: development ONLY — no TLS, no secret. Must be opted into
+ *   explicitly; the client logs a loud warning at startup.
+ */
+export interface NodeAuthConfig {
+  /** Auth mode. Defaults to 'shared-secret'. */
+  mode?: AuthMode;
+  /** Shared secret (required for shared-secret and mtls, min 16 chars). */
+  secret?: string;
+  /** PEM CA certificate (trust anchor for the coordinator). Required for shared-secret/mtls. */
+  caCertPath?: string;
+  /** Coordinator-side only — ignored by the node. */
+  serverCertPath?: string;
+  /** Coordinator-side only — ignored by the node. */
+  serverKeyPath?: string;
+  /** PEM client certificate. Required for mtls. */
+  clientCertPath?: string;
+  /** PEM client private key. Required for mtls. */
+  clientKeyPath?: string;
+}
+
 interface NodeConfigBase {
   /** This node's id (validated like core ids — used in file names). */
   nodeId: string;
@@ -43,11 +77,11 @@ interface NodeConfigBase {
    */
   safetyFactor?: number;
   /**
-   * PD-1 placeholder: static metadata attached to every coordinator call
-   * (e.g. shared-secret header). NOT real transport security — v1 assumes
-   * a trusted/loopback network until the auth decision lands.
+   * gRPC auth (PD-1). Defaults to `{ mode: 'shared-secret' }` — which then
+   * requires the CA path and the secret. `{ mode: 'insecure' }` is
+   * development-only and must be explicit.
    */
-  authMetadata?: Record<string, string>;
+  auth?: NodeAuthConfig;
   /** Bloom filter configuration. */
   filter: NodeFilterConfig;
 }
@@ -78,6 +112,37 @@ export const nodeFilterSchema = Joi.object({
   backupRatioTime: Joi.number().positive().optional(),
 });
 
+/**
+ * Node-side auth schema (PD-1). TLS modes require the CA + a >= 16-char
+ * shared secret; mtls additionally requires the client keypair; `insecure`
+ * requires nothing (it must merely be explicit).
+ */
+export const nodeAuthSchema = Joi.object({
+  mode: Joi.string().valid('shared-secret', 'mtls', 'insecure').default('shared-secret'),
+  secret: Joi.string().min(AUTH_SECRET_MIN_LENGTH).when('mode', {
+    is: 'insecure',
+    otherwise: Joi.required(),
+  }),
+  caCertPath: Joi.string().min(1).when('mode', {
+    is: 'insecure',
+    otherwise: Joi.required(),
+  }),
+  serverCertPath: Joi.string().min(1).optional(),
+  serverKeyPath: Joi.string().min(1).optional(),
+  clientCertPath: Joi.string()
+    .min(1)
+    .when('mode', {
+      is: Joi.string().not('mtls'),
+      otherwise: Joi.required(),
+    }),
+  clientKeyPath: Joi.string()
+    .min(1)
+    .when('mode', {
+      is: Joi.string().not('mtls'),
+      otherwise: Joi.required(),
+    }),
+});
+
 export const nodeInputSchema = Joi.object({
   nodeId: Joi.string().pattern(idPattern).required(),
   coordinatorAddress: Joi.string().min(3).required(),
@@ -85,7 +150,7 @@ export const nodeInputSchema = Joi.object({
   backupDir: Joi.string().min(1).required(),
   pollIntervalMs: Joi.number().integer().min(100).optional(),
   safetyFactor: Joi.number().min(2).optional(),
-  authMetadata: Joi.object().pattern(Joi.string(), Joi.string()).optional(),
+  auth: nodeAuthSchema.optional(),
   claimsToCheck: Joi.array().items(Joi.string().min(1)).min(1).optional(),
   payloadKey: Joi.string().min(1).optional(),
   opaqueHeader: Joi.string().min(1).optional(),

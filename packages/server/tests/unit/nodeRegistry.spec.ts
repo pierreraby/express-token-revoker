@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { ValidationError, InternalError } from 'express-token-revoker';
-import { NodeRegistry, type NodeConnection } from '../../src/nodeRegistry.js';
+import { InternalError, ValidationError } from 'express-token-revoker';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { type NodeConnection, NodeRegistry } from '../../src/nodeRegistry.js';
 
 /**
  * Fake connection capturing enqueue/close calls.

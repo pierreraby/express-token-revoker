@@ -1,13 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  createRevoker,
-  InternalError,
-  ValidationError,
   type Config as CoreRevokerConfig,
+  createRevoker,
   type GenericLogger,
+  InternalError,
   type Metrics,
   type Revoker,
+  ValidationError,
 } from 'express-token-revoker';
 import { CanonicalWal } from './canonicalWal.js';
 import { Meta } from './meta.js';
@@ -419,7 +419,9 @@ export class Coordinator {
       try {
         return fs.existsSync(blobPath) ? fs.readFileSync(blobPath) : Buffer.alloc(0);
       } catch (error) {
-        throw new InternalError(`Failed to read snapshot blob ${name}: ${(error as Error).message}`);
+        throw new InternalError(
+          `Failed to read snapshot blob ${name}: ${(error as Error).message}`
+        );
       }
     };
 

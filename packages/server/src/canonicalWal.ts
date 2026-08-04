@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { InternalError } from 'express-token-revoker';
-import type { GenericLogger, CanonicalEvent } from './types.js';
+import type { CanonicalEvent, GenericLogger } from './types.js';
 
 /**
  * Options for the canonical write-ahead log.

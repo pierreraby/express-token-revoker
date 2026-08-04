@@ -1,9 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
 import * as grpc from '@grpc/grpc-js';
-import {
-  CoordinatorClient,
-  type RawCoordinatorClient,
-} from '../../src/coordinatorClient.js';
+import { describe, expect, it, vi } from 'vitest';
+import { CoordinatorClient, type RawCoordinatorClient } from '../../src/coordinatorClient.js';
+import type { NodeAuthConfig } from '../../src/validation.js';
+import { fixtures, TEST_SHARED_SECRET } from '../helpers/fixtures.js';
 import { createMockLogger } from '../helpers/mock-logger.js';
 
 /**
@@ -34,13 +33,14 @@ function makeFakeRaw(options: FakeRawOptions = {}) {
     GetSnapshot: ReturnType<typeof vi.fn>;
     Subscribe: ReturnType<typeof vi.fn>;
     PollDeltas: ReturnType<typeof vi.fn>;
+    ListNodes: ReturnType<typeof vi.fn>;
     close: ReturnType<typeof vi.fn>;
   };
 }
 
 function makeClient(
   constructions: Array<ReturnType<typeof makeFakeRaw>>,
-  options: { authMetadata?: Record<string, string> } = {}
+  options: { authMetadata?: Record<string, string>; auth?: NodeAuthConfig } = {}
 ): CoordinatorClient {
   return new CoordinatorClient({
     address: '127.0.0.1:59999',
@@ -48,6 +48,7 @@ function makeClient(
     logger: createMockLogger(),
     connectTimeoutMs: 1000,
     authMetadata: options.authMetadata,
+    auth: options.auth,
     createRawClient: () => {
       const fake = makeFakeRaw();
       constructions.push(fake);
@@ -194,6 +195,135 @@ describe('CoordinatorClient call surface', () => {
     callback(null, page);
 
     await expect(pending).resolves.toEqual(page);
+    client.close();
+  });
+});
+
+describe('CoordinatorClient auth (PD-1)', () => {
+  const sharedSecretAuth: NodeAuthConfig = {
+    mode: 'shared-secret',
+    secret: TEST_SHARED_SECRET,
+    caCertPath: fixtures.caCertPath,
+  };
+
+  it("shared-secret injects x-shared-secret into every call's metadata", async () => {
+    const constructions: Array<ReturnType<typeof makeFakeRaw>> = [];
+    const client = makeClient(constructions, { auth: sharedSecretAuth });
+
+    const pending = client.getSnapshot();
+    await vi.waitFor(() => expect(constructions).toHaveLength(1));
+    const raw = constructions[0];
+    await vi.waitFor(() => expect(raw.GetSnapshot).toHaveBeenCalledTimes(1));
+    const [, metadata] = raw.GetSnapshot.mock.calls[0];
+    expect(metadata.get('x-shared-secret')).toEqual([TEST_SHARED_SECRET]);
+    raw.GetSnapshot.mock.calls[0][2](null, { currentBlob: Buffer.alloc(0) });
+    await pending;
+    client.close();
+  });
+
+  it('insecure mode logs a loud warning at construction', () => {
+    const logger = createMockLogger();
+    const client = new CoordinatorClient({
+      address: '127.0.0.1:59999',
+      nodeId: 'node-a',
+      logger,
+      auth: { mode: 'insecure' },
+      createRawClient: () => makeFakeRaw(),
+    });
+    const warnings = logger.warn.mock.calls.flat().join(' ');
+    expect(warnings).toMatch(/INSECURE MODE/);
+    expect(warnings).toMatch(/NO TLS/);
+    client.close();
+  });
+
+  it('shared-secret builds TLS channel credentials from the CA fixture', async () => {
+    let seen: grpc.ChannelCredentials | null = null;
+    const client = new CoordinatorClient({
+      address: 'localhost:59999',
+      nodeId: 'node-a',
+      logger: createMockLogger(),
+      auth: sharedSecretAuth,
+      createRawClient: (_address, credentials) => {
+        seen = credentials;
+        return makeFakeRaw();
+      },
+    });
+    await client.ensureConnected();
+    expect(seen).not.toBeNull();
+    // grpc-js exposes _isSecure() on channel credentials: TLS, not plaintext.
+    expect((seen as unknown as { _isSecure(): boolean })._isSecure()).toBe(true);
+    client.close();
+  });
+
+  it('mtls builds TLS channel credentials with the client keypair', async () => {
+    let seen: grpc.ChannelCredentials | null = null;
+    const client = new CoordinatorClient({
+      address: 'localhost:59999',
+      nodeId: 'node-a',
+      logger: createMockLogger(),
+      auth: {
+        mode: 'mtls',
+        secret: TEST_SHARED_SECRET,
+        caCertPath: fixtures.caCertPath,
+        clientCertPath: fixtures.client1CertPath,
+        clientKeyPath: fixtures.client1KeyPath,
+      },
+      createRawClient: (_address, credentials) => {
+        seen = credentials;
+        return makeFakeRaw();
+      },
+    });
+    await client.ensureConnected();
+    expect((seen as unknown as { _isSecure(): boolean })._isSecure()).toBe(true);
+    client.close();
+  });
+
+  it('insecure builds plaintext channel credentials', async () => {
+    let seen: grpc.ChannelCredentials | null = null;
+    const client = new CoordinatorClient({
+      address: '127.0.0.1:59999',
+      nodeId: 'node-a',
+      logger: createMockLogger(),
+      auth: { mode: 'insecure' },
+      createRawClient: (_address, credentials) => {
+        seen = credentials;
+        return makeFakeRaw();
+      },
+    });
+    await client.ensureConnected();
+    expect((seen as unknown as { _isSecure(): boolean })._isSecure()).toBe(false);
+    client.close();
+  });
+
+  it('rejects the connect with a ValidationError on unreadable cert paths', async () => {
+    const client = new CoordinatorClient({
+      address: 'localhost:59999',
+      nodeId: 'node-a',
+      logger: createMockLogger(),
+      auth: { ...sharedSecretAuth, caCertPath: '/nonexistent/ca.pem' },
+      createRawClient: () => makeFakeRaw(),
+    });
+    await expect(client.ensureConnected()).rejects.toThrow(
+      /Failed to load coordinator client TLS credentials/
+    );
+    client.close();
+  });
+
+  it('the shared secret wins over a conflicting authMetadata entry', async () => {
+    const constructions: Array<ReturnType<typeof makeFakeRaw>> = [];
+    const client = makeClient(constructions, {
+      auth: sharedSecretAuth,
+      authMetadata: { 'x-shared-secret': 'stale-value' },
+    });
+
+    const pending = client.listNodes();
+    await vi.waitFor(() => expect(constructions).toHaveLength(1));
+    const raw = constructions[0];
+    await vi.waitFor(() => expect(raw.ListNodes).toHaveBeenCalledTimes(1));
+    const [, metadata] = raw.ListNodes.mock.calls[0];
+    expect(metadata.get('x-shared-secret')).toEqual([TEST_SHARED_SECRET]);
+    raw.ListNodes.mock.calls[0][2](null, { nodes: [] });
+    await pending;
     client.close();
   });
 });

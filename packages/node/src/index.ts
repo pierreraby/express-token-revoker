@@ -1,5 +1,5 @@
 import { ValidationError } from 'express-token-revoker';
-import { RevokerNode, type NodeDependencies } from './revokerNode.js';
+import { type NodeDependencies, RevokerNode } from './revokerNode.js';
 import { nodeInputSchema, type RevokerNodeConfig } from './validation.js';
 
 /**
@@ -49,11 +49,19 @@ export async function createRevokerNode(
   return node;
 }
 
-export { RevokerNode } from './revokerNode.js';
-export type { CoordinatorClientLike, NodeDependencies, NodeHealthStatus, SyncHealthComponent } from './revokerNode.js';
-export { CoordinatorClient } from './coordinatorClient.js';
+// Re-export core's error classes so consumers of the node package do not
+// need a second import for catch blocks.
+export { InternalError, ValidationError } from 'express-token-revoker';
 export type { CoordinatorClientOptions, RawCoordinatorClient } from './coordinatorClient.js';
-export { SyncEngine } from './syncEngine.js';
+export { CoordinatorClient, SHARED_SECRET_METADATA_KEY } from './coordinatorClient.js';
+export type {
+  CoordinatorClientLike,
+  NodeDependencies,
+  NodeHealthStatus,
+  SyncHealthComponent,
+} from './revokerNode.js';
+export { RevokerNode } from './revokerNode.js';
+export { StateFile } from './stateFile.js';
 export type {
   SyncEngineClient,
   SyncEngineMode,
@@ -62,15 +70,20 @@ export type {
   SyncStateStore,
   SyncSubscription,
 } from './syncEngine.js';
-export { StateFile } from './stateFile.js';
-export { nodeInputSchema, nodeFilterSchema, idPattern } from './validation.js';
+export { SyncEngine } from './syncEngine.js';
+export type { GenericLogger, SnapshotResponse, SyncState, WireStreamEvent } from './types.js';
 export type {
+  AuthMode,
+  NodeAuthConfig,
   NodeFilterConfig,
   RevokerNodeConfig,
   RevokerNodeJWTConfig,
   RevokerNodeOpaqueConfig,
 } from './validation.js';
-export type { GenericLogger, SnapshotResponse, SyncState, WireStreamEvent } from './types.js';
-// Re-export core's error classes so consumers of the node package do not
-// need a second import for catch blocks.
-export { ValidationError, InternalError } from 'express-token-revoker';
+export {
+  AUTH_SECRET_MIN_LENGTH,
+  idPattern,
+  nodeAuthSchema,
+  nodeFilterSchema,
+  nodeInputSchema,
+} from './validation.js';

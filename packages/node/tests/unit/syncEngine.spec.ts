@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SyncEngine, type SyncSubscription } from '../../src/syncEngine.js';
 import type { WireStreamEvent } from '../../src/types.js';
 import { createMockLogger } from '../helpers/mock-logger.js';
@@ -73,7 +73,10 @@ function makeHarness(
     maxReconnectDelayMs?: number;
     delayFn?: (ms: number) => Promise<void>;
     subscribeImpl?: (lastLsn: number) => Promise<SyncSubscription>;
-    pollImpl?: (fromLsn: number, maxEvents: number) => Promise<{
+    pollImpl?: (
+      fromLsn: number,
+      maxEvents: number
+    ) => Promise<{
       events: WireStreamEvent[];
       moreAvailable: boolean;
     }>;
@@ -88,12 +91,13 @@ function makeHarness(
   const applyEntry = vi.fn((item: string) => {
     timeline.push(`apply:${item}`);
   });
-  const rotateOnDemand = vi.fn(options.rotateImpl ?? (async () => {
-    timeline.push('rotate');
-  }));
-  const subscribe = vi.fn(
-    options.subscribeImpl ?? (async () => stream as SyncSubscription)
+  const rotateOnDemand = vi.fn(
+    options.rotateImpl ??
+      (async () => {
+        timeline.push('rotate');
+      })
   );
+  const subscribe = vi.fn(options.subscribeImpl ?? (async () => stream as SyncSubscription));
   const pollDeltas = vi.fn(
     options.pollImpl ?? (async () => ({ events: [] as WireStreamEvent[], moreAvailable: false }))
   );
@@ -391,10 +395,7 @@ describe('SyncEngine degraded mode', () => {
       events: [rotate(1, 1)],
       moreAvailable: false,
     }));
-    await vi.waitFor(
-      () => expect(harness?.rotateOnDemand).toHaveBeenCalled(),
-      { timeout: 5000 }
-    );
+    await vi.waitFor(() => expect(harness?.rotateOnDemand).toHaveBeenCalled(), { timeout: 5000 });
     // Rotation is pending (blocked on the gate) ⇒ driven.
     expect(harness.engine.isRotationExternallyDriven()).toBe(true);
 

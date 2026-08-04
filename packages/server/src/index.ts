@@ -2,7 +2,7 @@ import { ValidationError } from 'express-token-revoker';
 import { Coordinator } from './coordinator.js';
 import { DistributedServer } from './distributedServer.js';
 import { NodeRegistry } from './nodeRegistry.js';
-import { coordinatorInputSchema, type CoordinatorConfig } from './validation.js';
+import { type CoordinatorConfig, coordinatorInputSchema } from './validation.js';
 
 /**
  * A started coordinator: the wrapped revoker, the gRPC service and the
@@ -29,8 +29,8 @@ export interface CoordinatorHandle {
  *
  * @param config - Coordinator configuration (validated with Joi).
  * @returns A handle exposing the coordinator, the server and shutdown.
- * @throws {ValidationError} If the configuration is invalid or the bind is
- * refused (non-loopback without allowInsecure).
+ * @throws {ValidationError} If the configuration is invalid (including an
+ * incomplete auth block) or the bind is refused (insecure + non-loopback).
  * @throws {InternalError} If the coordinator fails to start.
  */
 export async function createCoordinator(config: CoordinatorConfig): Promise<CoordinatorHandle> {
@@ -51,7 +51,7 @@ export async function createCoordinator(config: CoordinatorConfig): Promise<Coor
     logger: validated.logger ?? console,
     host: validated.host,
     port: validated.port,
-    allowInsecure: validated.allowInsecure,
+    auth: validated.auth,
     keepaliveIntervalMs: validated.keepaliveIntervalMs,
   });
 
@@ -86,32 +86,36 @@ export async function createCoordinator(config: CoordinatorConfig): Promise<Coor
   };
 }
 
-export { Coordinator, MAX_ITEM_LENGTH, itemValidationError } from './coordinator.js';
-export { DistributedServer } from './distributedServer.js';
-export type { DistributedServerOptions } from './distributedServer.js';
-export { CanonicalWal } from './canonicalWal.js';
+// Re-export core's error classes so consumers of the server package do not
+// need a second import for catch blocks.
+export { InternalError, ValidationError } from 'express-token-revoker';
 export type { CanonicalWalOptions, CanonicalWalScan } from './canonicalWal.js';
-export { Meta, EMPTY_META_STATE } from './meta.js';
-export { NodeRegistry } from './nodeRegistry.js';
+export { CanonicalWal } from './canonicalWal.js';
+export type { AddResult, LiveEventListener, SnapshotData } from './coordinator.js';
+export { Coordinator, itemValidationError, MAX_ITEM_LENGTH } from './coordinator.js';
+export type { DistributedServerOptions } from './distributedServer.js';
+export { DistributedServer, SHARED_SECRET_METADATA_KEY } from './distributedServer.js';
+export { EMPTY_META_STATE, Meta } from './meta.js';
 export type { NodeConnection, NodeEntryView } from './nodeRegistry.js';
-export {
-  coordinatorInputSchema,
-  coordinatorFilterSchema,
-  idPattern,
-} from './validation.js';
+export { NodeRegistry } from './nodeRegistry.js';
 export type {
+  CanonicalEvent,
+  GenericLogger,
+  MetaState,
+  OutboundEvent,
+} from './types.js';
+export type {
+  AuthMode,
+  CoordinatorAuthConfig,
   CoordinatorConfig,
   CoordinatorFilterConfig,
   CoordinatorJWTConfig,
   CoordinatorOpaqueConfig,
 } from './validation.js';
-export type {
-  CanonicalEvent,
-  MetaState,
-  OutboundEvent,
-  GenericLogger,
-} from './types.js';
-export type { SnapshotData, AddResult, LiveEventListener } from './coordinator.js';
-// Re-export core's error classes so consumers of the server package do not
-// need a second import for catch blocks.
-export { ValidationError, InternalError } from 'express-token-revoker';
+export {
+  AUTH_SECRET_MIN_LENGTH,
+  coordinatorAuthSchema,
+  coordinatorFilterSchema,
+  coordinatorInputSchema,
+  idPattern,
+} from './validation.js';

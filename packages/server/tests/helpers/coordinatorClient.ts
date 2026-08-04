@@ -1,7 +1,7 @@
-import * as grpc from '@grpc/grpc-js';
-import * as protoLoader from '@grpc/proto-loader';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import * as grpc from '@grpc/grpc-js';
+import * as protoLoader from '@grpc/proto-loader';
 
 /**
  * Test-side gRPC client plumbing for the RevokerCoordinator service.
@@ -63,22 +63,40 @@ export interface CoordinatorTestClient {
   listNodes(): Promise<{
     nodes: Array<{ nodeId: string; lastLsn: string; lastSeenMs: string; connected: boolean }>;
   }>;
-  subscribe(request: { nodeId: string; lastLsn: string | number }): grpc.ClientReadableStream<WireStreamEvent>;
+  subscribe(request: {
+    nodeId: string;
+    lastLsn: string | number;
+  }): grpc.ClientReadableStream<WireStreamEvent>;
   close(): void;
 }
 
 /**
  * Creates a raw grpc-js client for the RevokerCoordinator service.
+ *
+ * Auth (PD-1): pass TLS `credentials` and/or shared-secret `secret` to hit
+ * a TLS-mode coordinator; defaults stay plaintext for the insecure-mode
+ * test flows.
  */
-export function createTestCoordinatorClient(address: string): CoordinatorTestClient {
+export function createTestCoordinatorClient(
+  address: string,
+  options: { credentials?: grpc.ChannelCredentials; secret?: string } = {}
+): CoordinatorTestClient {
   const raw: any = new protoDescriptor.revoker.distributed.RevokerCoordinator(
     address,
-    grpc.credentials.createInsecure()
+    options.credentials ?? grpc.credentials.createInsecure()
   );
+
+  const metadata = (): grpc.Metadata => {
+    const md = new grpc.Metadata();
+    if (options.secret !== undefined) {
+      md.set('x-shared-secret', options.secret);
+    }
+    return md;
+  };
 
   const unary = <TReq, TRes>(method: string, request: TReq): Promise<TRes> =>
     new Promise<TRes>((resolve, reject) => {
-      raw[method](request, (err: grpc.ServiceError | null, response: TRes) => {
+      raw[method](request, metadata(), (err: grpc.ServiceError | null, response: TRes) => {
         if (err) {
           reject(err);
         } else {
@@ -93,7 +111,7 @@ export function createTestCoordinatorClient(address: string): CoordinatorTestCli
     getSnapshot: (request) => unary('GetSnapshot', request),
     pollDeltas: (request) => unary('PollDeltas', request),
     listNodes: () => unary('ListNodes', {}),
-    subscribe: (request) => raw.Subscribe(request),
+    subscribe: (request) => raw.Subscribe(request, metadata()),
     close: () => raw.close(),
   };
 }
@@ -206,7 +224,9 @@ export function waitForStreamError(
       if (error.code === expectedCode) {
         resolve(error);
       } else {
-        reject(new Error(`Expected gRPC code ${expectedCode}, got ${error.code}: ${error.message}`));
+        reject(
+          new Error(`Expected gRPC code ${expectedCode}, got ${error.code}: ${error.message}`)
+        );
       }
     };
     const onEnd = (): void => {

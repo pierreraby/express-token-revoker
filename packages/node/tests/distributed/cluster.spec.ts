@@ -1,11 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CoordinatorClient } from '../../src/index.js';
-import {
-  StreamCorruptor,
-  StreamGate,
-  TestCluster,
-  makeSnapshotSpy,
-} from '../helpers/cluster.js';
+import { makeSnapshotSpy, StreamCorruptor, StreamGate, TestCluster } from '../helpers/cluster.js';
 
 /**
  * Distributed cluster scenarios — THE PROOF.
@@ -118,9 +113,7 @@ describe('Distributed cluster scenarios (integration, real coordinator + nodes)'
     expect(nodeFast.has('frontier-token')).toBe(true);
     expect(nodeFast.has('frontier-late')).toBe(true);
     // nodeLag is fully caught up.
-    expect(nodeLag.healthCheck().checks.sync.lastAppliedLsn).toBe(
-      handle.coordinator.lastLsn
-    );
+    expect(nodeLag.healthCheck().checks.sync.lastAppliedLsn).toBe(handle.coordinator.lastLsn);
   });
 
   it('scenario 3 — coordinator down: nodes keep serving revocations, then self-rotate dirty', async () => {
@@ -195,9 +188,7 @@ describe('Distributed cluster scenarios (integration, real coordinator + nodes)'
     // Exactly ONE new apply: nothing missed, nothing double-applied
     // (at-least-once redelivery is skipped by the LSN check, not re-applied).
     expect(node.getMetrics().counters.applied).toBe(appliedBefore + 1);
-    expect(node.healthCheck().checks.sync.lastAppliedLsn).toBe(
-      handle2.coordinator.lastLsn
-    );
+    expect(node.healthCheck().checks.sync.lastAppliedLsn).toBe(handle2.coordinator.lastLsn);
     // The pre-outage revocation is still covered.
     expect(node.has('r-1')).toBe(true);
   });
@@ -283,9 +274,7 @@ describe('Distributed cluster scenarios (integration, real coordinator + nodes)'
       expect(node2.has(item), `expected ${item} revoked on the joining node`).toBe(true);
     }
     expect(node2.has('never-revoked')).toBe(false);
-    expect(node2.healthCheck().checks.sync.lastAppliedLsn).toBe(
-      handle.coordinator.lastLsn
-    );
+    expect(node2.healthCheck().checks.sync.lastAppliedLsn).toBe(handle.coordinator.lastLsn);
   });
 
   it('scenario 6 — injected LSN gap: the node rebootstraps instead of diverging silently', async () => {

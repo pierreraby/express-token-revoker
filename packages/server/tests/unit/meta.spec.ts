@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { InternalError } from 'express-token-revoker';
-import { Meta, EMPTY_META_STATE } from '../../src/meta.js';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { EMPTY_META_STATE, Meta } from '../../src/meta.js';
 
 describe('Meta — atomic coordinator state persistence', () => {
   let dir: string;

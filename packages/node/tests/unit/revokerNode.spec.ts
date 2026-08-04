@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { createRevokerNode } from '../../src/index.js';
 import type { RevokerNodeConfig } from '../../src/validation.js';
 import { createMockLogger } from '../helpers/mock-logger.js';
@@ -16,6 +16,9 @@ function baseConfig(overrides: Partial<RevokerNodeConfig> = {}): RevokerNodeConf
     logger: createMockLogger(),
     backupDir: '/tmp/etr-node-validation-matrix',
     opaqueHeader: 'Authorization',
+    // Explicit dev-only auth (PD-1): keeps the validation matrix focused on
+    // the fields under test.
+    auth: { mode: 'insecure' },
     filter: {
       numItems: 1000,
       fpRate: 0.0001,
@@ -96,17 +99,13 @@ describe('createRevokerNode config validation', () => {
 
   it('rejects numItems below 1', async () => {
     await expect(
-      createRevokerNode(
-        baseConfig({ filter: { numItems: 0, fpRate: 0.0001, rotateTime: 1000 } })
-      )
+      createRevokerNode(baseConfig({ filter: { numItems: 0, fpRate: 0.0001, rotateTime: 1000 } }))
     ).rejects.toThrow(/Invalid node config/);
   });
 
   it('rejects a non-positive rotateTime', async () => {
     await expect(
-      createRevokerNode(
-        baseConfig({ filter: { numItems: 1000, fpRate: 0.0001, rotateTime: -5 } })
-      )
+      createRevokerNode(baseConfig({ filter: { numItems: 1000, fpRate: 0.0001, rotateTime: -5 } }))
     ).rejects.toThrow(/Invalid node config/);
   });
 

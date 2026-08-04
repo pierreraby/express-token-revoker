@@ -1,19 +1,20 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as grpc from '@grpc/grpc-js';
-import { createCoordinator, type CoordinatorHandle } from '../../src/index.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { type CoordinatorHandle, createCoordinator } from '../../src/index.js';
 import type { CoordinatorConfig } from '../../src/validation.js';
-import { createMockLogger } from '../helpers/mock-logger.js';
 import {
+  type CoordinatorTestClient,
+  cancelStream,
   collectStreamEvents,
   collectUntilEnd,
   createTestCoordinatorClient,
   waitForStreamError,
-  cancelStream,
-  type CoordinatorTestClient,
 } from '../helpers/coordinatorClient.js';
+import { fixtures, TEST_SHARED_SECRET } from '../helpers/fixtures.js';
+import { createMockLogger } from '../helpers/mock-logger.js';
 
 /**
  * Integration tests for the coordinator's distributed gRPC service.
@@ -22,13 +23,19 @@ import {
 
 const ROTATE_TIME_MS = 3_600_000; // auto-rotation must never fire inside a test
 
-function baseConfig(backupDir: string, overrides: Partial<CoordinatorConfig> = {}): CoordinatorConfig {
+function baseConfig(
+  backupDir: string,
+  overrides: Partial<CoordinatorConfig> = {}
+): CoordinatorConfig {
   return {
     id: 'coord-test',
     logger: createMockLogger(),
     port: 0,
     backupDir,
     opaqueHeader: 'Authorization',
+    // Existing fast tests run the explicit dev-only mode (PD-1); the auth
+    // describe block below covers the TLS modes with the static fixtures.
+    auth: { mode: 'insecure' },
     filter: {
       numItems: 1000,
       fpRate: 0.0001,
@@ -82,10 +89,60 @@ describe('Coordinator distributed service (integration, port 0)', () => {
     ).rejects.toThrow(/Invalid coordinator config/);
   });
 
-  it('refuses a non-loopback bind without allowInsecure', async () => {
+  it('refuses a non-loopback bind in insecure mode', async () => {
     await expect(
       createCoordinator(baseConfig(makeDir(), { host: '192.168.1.10' }) as CoordinatorConfig)
     ).rejects.toThrow(/non-loopback/);
+  });
+
+  it('logs a loud warning when started in insecure mode', async () => {
+    const logger = createMockLogger();
+    const handle = await createCoordinator(
+      baseConfig(makeDir(), { logger } as Partial<CoordinatorConfig>)
+    );
+    handles.push(handle);
+    const warnings = logger.warn.mock.calls.flat().join(' ');
+    expect(warnings).toMatch(/INSECURE MODE/);
+    expect(warnings).toMatch(/NO TLS/);
+  });
+
+  it('rejects an incomplete auth config before starting (no partial state)', async () => {
+    // shared-secret (default mode) without the secret / cert paths.
+    await expect(
+      createCoordinator(
+        baseConfig(makeDir(), {
+          auth: { mode: 'shared-secret', caCertPath: fixtures.caCertPath },
+        } as CoordinatorConfig)
+      )
+    ).rejects.toThrow(/Invalid coordinator config/);
+    // Secret shorter than 16 chars.
+    await expect(
+      createCoordinator(
+        baseConfig(makeDir(), {
+          auth: {
+            mode: 'shared-secret',
+            secret: 'short',
+            caCertPath: fixtures.caCertPath,
+            serverCertPath: fixtures.serverCertPath,
+            serverKeyPath: fixtures.serverKeyPath,
+          },
+        } as CoordinatorConfig)
+      )
+    ).rejects.toThrow(/Invalid coordinator config/);
+    // Unreadable cert path fails cleanly at start.
+    await expect(
+      createCoordinator(
+        baseConfig(makeDir(), {
+          auth: {
+            mode: 'shared-secret',
+            secret: TEST_SHARED_SECRET,
+            caCertPath: '/nonexistent/ca.pem',
+            serverCertPath: fixtures.serverCertPath,
+            serverKeyPath: fixtures.serverKeyPath,
+          },
+        } as CoordinatorConfig)
+      )
+    ).rejects.toThrow(/Failed to load coordinator TLS credentials/);
   });
 
   it('streams admin Adds to a subscribed node in LSN order', async () => {
@@ -183,7 +240,10 @@ describe('Coordinator distributed service (integration, port 0)', () => {
     expect(earlySnapshot.rotateTime).toBe(ROTATE_TIME_MS);
 
     // Tail-replay from the consistency point reconstructs the state.
-    const earlyTail = await client.subscribe({ nodeId: 'node-b', lastLsn: earlySnapshot.lastBackupLsn });
+    const earlyTail = await client.subscribe({
+      nodeId: 'node-b',
+      lastLsn: earlySnapshot.lastBackupLsn,
+    });
     let events = await collectStreamEvents(earlyTail, 2);
     expect(events.map((e) => e.entry?.item)).toEqual(['snap-1', 'snap-2']);
     cancelStream(earlyTail);
@@ -337,5 +397,201 @@ describe('Coordinator distributed service (integration, port 0)', () => {
     expect(resnapshotEvents).toHaveLength(1);
     expect(resnapshotEvents[0].event).toBe('resnapshot');
     expect(resnapshotEvents[0].resnapshot?.generation).toBe(1);
+  });
+});
+
+/**
+ * PD-1 auth modes on the gRPC link, exercised with the static TLS
+ * fixtures (packages/fixtures) and the real wire protocol.
+ */
+describe('Coordinator auth (PD-1, TLS fixtures)', () => {
+  const handles: CoordinatorHandle[] = [];
+  const clients: CoordinatorTestClient[] = [];
+  const tempDirs: string[] = [];
+
+  const makeDir = (): string => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'etr-coord-auth-'));
+    tempDirs.push(dir);
+    return dir;
+  };
+
+  const authConfig = (auth: Record<string, unknown>): CoordinatorConfig =>
+    ({
+      id: 'coord-auth-test',
+      logger: createMockLogger(),
+      port: 0,
+      backupDir: makeDir(),
+      opaqueHeader: 'Authorization',
+      auth,
+      filter: {
+        numItems: 1000,
+        fpRate: 0.0001,
+        rotateTime: ROTATE_TIME_MS,
+        backupRatioTime: 2,
+      },
+    }) as unknown as CoordinatorConfig;
+
+  afterEach(async () => {
+    for (const client of clients.splice(0)) {
+      try {
+        client.close();
+      } catch {
+        // best effort
+      }
+    }
+    for (const handle of handles.splice(0)) {
+      await handle.shutdown();
+    }
+    for (const dir of tempDirs.splice(0)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  const tlsCredentials = (): grpc.ChannelCredentials =>
+    grpc.ChannelCredentials.createSsl(fs.readFileSync(fixtures.caCertPath));
+
+  const mtlsCredentials = (certPath: string, keyPath: string): grpc.ChannelCredentials =>
+    grpc.ChannelCredentials.createSsl(
+      fs.readFileSync(fixtures.caCertPath),
+      fs.readFileSync(keyPath),
+      fs.readFileSync(certPath)
+    );
+
+  it('shared-secret: correct secret works end-to-end (Add + Subscribe + GetSnapshot)', async () => {
+    const handle = await createCoordinator(
+      authConfig({
+        mode: 'shared-secret',
+        secret: TEST_SHARED_SECRET,
+        caCertPath: fixtures.caCertPath,
+        serverCertPath: fixtures.serverCertPath,
+        serverKeyPath: fixtures.serverKeyPath,
+      })
+    );
+    handles.push(handle);
+
+    const client = createTestCoordinatorClient(`localhost:${handle.port}`, {
+      credentials: tlsCredentials(),
+      secret: TEST_SHARED_SECRET,
+    });
+    clients.push(client);
+
+    // Unary paths are authenticated.
+    const add = await client.add({ item: 'sec-token' });
+    expect(add.success).toBe(true);
+    expect((await client.has({ item: 'sec-token' })).exists).toBe(true);
+    const snapshot = await client.getSnapshot({ nodeId: 'node-a' });
+    expect(snapshot.numItems).toBe(1000);
+
+    // The server-streaming path is authenticated too, and delivers events.
+    const stream = client.subscribe({ nodeId: 'node-a', lastLsn: '0' });
+    const events = await collectStreamEvents(stream, 1);
+    expect(events[0].entry?.item).toBe('sec-token');
+    cancelStream(stream);
+  });
+
+  it('shared-secret: wrong secret is rejected with UNAUTHENTICATED', async () => {
+    const handle = await createCoordinator(
+      authConfig({
+        mode: 'shared-secret',
+        secret: TEST_SHARED_SECRET,
+        caCertPath: fixtures.caCertPath,
+        serverCertPath: fixtures.serverCertPath,
+        serverKeyPath: fixtures.serverKeyPath,
+      })
+    );
+    handles.push(handle);
+
+    const client = createTestCoordinatorClient(`localhost:${handle.port}`, {
+      credentials: tlsCredentials(),
+      secret: 'wrong-secret-0123456789',
+    });
+    clients.push(client);
+
+    await expect(client.has({ item: 'anything' })).rejects.toMatchObject({
+      code: grpc.status.UNAUTHENTICATED,
+    });
+
+    // The streaming path is guarded as well.
+    const stream = client.subscribe({ nodeId: 'node-a', lastLsn: '0' });
+    await waitForStreamError(stream, grpc.status.UNAUTHENTICATED);
+  });
+
+  it('shared-secret: missing secret is rejected with UNAUTHENTICATED', async () => {
+    const handle = await createCoordinator(
+      authConfig({
+        mode: 'shared-secret',
+        secret: TEST_SHARED_SECRET,
+        caCertPath: fixtures.caCertPath,
+        serverCertPath: fixtures.serverCertPath,
+        serverKeyPath: fixtures.serverKeyPath,
+      })
+    );
+    handles.push(handle);
+
+    // TLS client WITHOUT the metadata secret.
+    const client = createTestCoordinatorClient(`localhost:${handle.port}`, {
+      credentials: tlsCredentials(),
+    });
+    clients.push(client);
+
+    await expect(client.getSnapshot({ nodeId: 'node-a' })).rejects.toMatchObject({
+      code: grpc.status.UNAUTHENTICATED,
+    });
+  });
+
+  it('mtls: a client WITH a CA-signed certificate works', async () => {
+    const handle = await createCoordinator(
+      authConfig({
+        mode: 'mtls',
+        secret: TEST_SHARED_SECRET,
+        caCertPath: fixtures.caCertPath,
+        serverCertPath: fixtures.serverCertPath,
+        serverKeyPath: fixtures.serverKeyPath,
+      })
+    );
+    handles.push(handle);
+
+    const client = createTestCoordinatorClient(`localhost:${handle.port}`, {
+      credentials: mtlsCredentials(fixtures.client1CertPath, fixtures.client1KeyPath),
+      secret: TEST_SHARED_SECRET,
+    });
+    clients.push(client);
+
+    const add = await client.add({ item: 'mtls-token' });
+    expect(add.success).toBe(true);
+    expect((await client.has({ item: 'mtls-token' })).exists).toBe(true);
+  });
+
+  it('mtls: a client WITHOUT a certificate is rejected at the TLS layer', async () => {
+    const handle = await createCoordinator(
+      authConfig({
+        mode: 'mtls',
+        secret: TEST_SHARED_SECRET,
+        caCertPath: fixtures.caCertPath,
+        serverCertPath: fixtures.serverCertPath,
+        serverKeyPath: fixtures.serverKeyPath,
+      })
+    );
+    handles.push(handle);
+
+    // One-way TLS client (no client cert) against a checkClientCertificate
+    // server: the TLS handshake is rejected server-side ("certificate
+    // required" alert), so the call fails before any handler runs —
+    // grpc-js surfaces that RST_STREAM as INTERNAL.
+    const client = createTestCoordinatorClient(`localhost:${handle.port}`, {
+      credentials: tlsCredentials(),
+      secret: TEST_SHARED_SECRET,
+    });
+    clients.push(client);
+
+    let error: grpc.ServiceError | null = null;
+    try {
+      await client.has({ item: 'anything' });
+    } catch (caught) {
+      error = caught as grpc.ServiceError;
+    }
+    expect(error).not.toBeNull();
+    expect(error?.code).toBe(grpc.status.INTERNAL);
+    expect(String(error?.message)).toMatch(/certificate/i);
   });
 });
