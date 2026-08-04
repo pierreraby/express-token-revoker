@@ -1,0 +1,58 @@
+{
+  "name": "@express-token-revoker/node",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Distributed participant node for express-token-revoker — replicates revocation deltas from the coordinator over an ordered gRPC stream and serves the Express middleware from local state.",
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./build/index.d.ts",
+      "import": "./build/index.js"
+    }
+  },
+  "files": [
+    "build"
+  ],
+  "keywords": [
+    "express",
+    "token",
+    "revocation",
+    "bloom-filter",
+    "distributed",
+    "node",
+    "grpc"
+  ],
+  "author": "Pierre Raby",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pierreraby/express-token-revoker.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.12.5",
+    "@grpc/proto-loader": "^0.7.13",
+    "express-token-revoker": "workspace:*",
+    "joi": "^17.13.3"
+  },
+  "peerDependencies": {
+    "express": "^4.17.21 || ^5.0.0"
+  },
+  "devDependencies": {
+    "@express-token-revoker/server": "workspace:*",
+    "@types/express": "^4.17.25",
+    "@types/node": "^26.1.2",
+    "express": "^4.21.2",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

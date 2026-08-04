@@ -102,6 +102,16 @@
       }
     },
     {
+      "includes": ["packages/node/src/index.ts"],
+      "linter": {
+        "rules": {
+          "performance": {
+            "noBarrelFile": "off"
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/*.{test,spec}.{ts,tsx,js,jsx}"],
       "linter": {
         "rules": {
