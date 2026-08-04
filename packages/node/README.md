@@ -10,8 +10,9 @@ the Express revocation middleware from **local state only** — the request
 path never talks to the coordinator.
 
 > **Status: alpha.** Part of the distributed v1 slice. The auth/TLS decision
-> for the coordinator link (PD-1) is still pending: keep the link on a
-> trusted network / loopback until it lands.
+> for the coordinator link (PD-1) is decided and implemented (3 modes:
+> `shared-secret` default, `mtls`, `insecure` dev-only) — see
+> `docs/distributed-architecture.md`.
 
 ## Guarantees
 

@@ -35,7 +35,8 @@ export interface SnapshotResponse {
  * - `generation`: coordinated generation after the last applied Rotate.
  * - `dirty`: the node self-rotated while degraded (coordinator unreachable
  *   beyond the safety timeout). A dirty node re-bootstraps from the
- *   coordinator snapshot on reconnect instead of incremental catch-up.
+ *   coordinator snapshot on its next restart (init) instead of incremental
+ *   catch-up.
  */
 export interface SyncState {
   lastLsn: number;

@@ -323,7 +323,7 @@ The admin service is **unauthenticated**. By default it binds to `127.0.0.1` (lo
 
 ### Topology (standalone)
 
-Revocation state lives **in the process** that runs the revoker. In the current standalone topology, run one gRPC-enabled revoker process and administer it through the gRPC API; other services call it over gRPC. Transparent multi-instance synchronization is on the roadmap (distributed mode).
+Revocation state lives **in the process** that runs the revoker. In the standalone topology, run one gRPC-enabled revoker process and administer it through the gRPC API; other services call it over gRPC. Transparent multi-instance synchronization is available in **alpha** via the private `@express-token-revoker/server` / `@express-token-revoker/node` packages — distributed quickstart: [`docs/distributed-architecture.md`](../../docs/distributed-architecture.md).
 
 ## Benchmarks
 

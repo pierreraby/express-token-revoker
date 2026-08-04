@@ -57,7 +57,7 @@ export interface SyncHealthComponent extends HealthCheckComponent {
   mode: 'bootstrap' | 'streaming' | 'poll';
   /** Highest replication LSN applied and persisted. */
   lastAppliedLsn: number;
-  /** True after a degraded self-rotation (node re-bootstraps on reconnect). */
+  /** True after a degraded self-rotation (snapshot rebootstrap on next restart). */
   dirty: boolean;
 }
 
@@ -78,13 +78,18 @@ export interface NodeHealthStatus {
  *   `Subscribe(lastBackupLsn)` replays the canonical tail ⇒ exact state.
  * - **Clean restart**: persisted sync state + local blobs ⇒ local core
  *   restore + `Subscribe(lastLsn)` — no snapshot needed.
+ * - **Dirty restart**: a persisted dirty flag (degraded self-rotation,
+ *   below) ⇒ full rebootstrap from the coordinator snapshot at init.
  * - **Degraded mode** (coordinator down): the node keeps serving checks
  *   from local state; the sync engine polls and reconnects with backoff.
  *   New revocations are refused — `add()` always throws (coordinator-only).
  * - **Degraded self-rotation**: core runs with
  *   `rotateTime = coordinatorRotateTime × safetyFactor`; a rotation with no
  *   coordinated event in that window means core's own timer fired ⇒ the
- *   node marks itself dirty and re-bootstraps on reconnect.
+ *   node marks itself dirty. This does NOT rebootstrap the live node: the
+ *   sync engine keeps catching up incrementally on reconnect (safe — no new
+ *   revocations exist while the coordinator is down), and the snapshot
+ *   rebootstrap happens on the next restart.
  * - **Never drop a delta**: LSN gaps, generation mismatches or
  *   `ResnapshotRequired` trigger a loud rebootstrap from the snapshot.
  *
@@ -438,7 +443,8 @@ export class RevokerNode {
   /**
    * Core rotation observer. Coordinated rotations (stream or poll) are
    * flagged by the engine; anything else while the engine exists is a
-   * degraded SELF-rotation ⇒ mark dirty (rebootstrap on reconnect).
+   * degraded SELF-rotation ⇒ mark dirty (snapshot rebootstrap on next
+   * restart).
    */
   #onCoreRotation(): void {
     if (this.#shuttingDown) {
@@ -449,7 +455,7 @@ export class RevokerNode {
     }
     this.#logger.warn(
       `Node ${this.#config.nodeId}: degraded self-rotation detected — ` +
-        'marking sync state dirty (rebootstrap on reconnect)'
+        'marking sync state dirty (snapshot rebootstrap on next restart)'
     );
     this.#dirty = true;
     this.#stateFile?.update({ dirty: true });

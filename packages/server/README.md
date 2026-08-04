@@ -52,8 +52,10 @@ await coordinator.shutdown();
 
 ## Security posture (v1)
 
-The coordinator service is unauthenticated and binds to the loopback
-interface by default. Binding to a non-loopback host is refused unless
-`allowInsecure: true` is explicitly set (trusted-LAN opt-in). TLS/mTLS for
-the coordinator↔node link is a pending product decision (PD-1) — do not
-expose a coordinator on an untrusted network in v1.
+The coordinator↔node gRPC link is authenticated (PD-1, decided and
+implemented): `auth.mode` defaults to `shared-secret` (one-way TLS + shared
+secret ≥ 16 chars in gRPC metadata); `mtls` adds mutual TLS; `insecure` is
+development-only — it must be opted into explicitly, logs a loud warning at
+startup and refuses non-loopback binds. `scripts/gen-certs.mjs` generates the
+TLS material. See `docs/distributed-architecture.md` (repo root) for the
+auth table and requirements per mode.

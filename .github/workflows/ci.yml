@@ -30,11 +30,15 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Type check & build
+      # Root scripts run `pnpm -r` — build & test cover all packages
+      # (core, server, node) in topological order.
+      - name: Type check & build (all packages)
         run: pnpm build
 
-      - name: Tests
+      - name: Tests (all packages)
         run: pnpm test
 
+      # server/node are private (PD-3) — the packaging smoke test stays
+      # core-only.
       - name: Packaging smoke test
         run: pnpm --filter express-token-revoker exec npm pack --dry-run

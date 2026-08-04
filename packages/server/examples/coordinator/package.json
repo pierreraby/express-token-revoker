@@ -1,0 +1,17 @@
+{
+  "name": "coordinator-example",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal distributed coordinator example for @express-token-revoker/server.",
+  "scripts": {
+    "start": "node --env-file=.env coordinator.js"
+  },
+  "dependencies": {
+    "@express-token-revoker/server": "workspace:*",
+    "pino": "^9.6.0"
+  },
+  "devDependencies": {
+    "pino-pretty": "^13.0.0"
+  }
+}

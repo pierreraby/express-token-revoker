@@ -98,8 +98,10 @@ function withJitter(delayMs: number): number {
  * rotateTime = coordinatorRotateTime × safetyFactor, so its own interval
  * fires only when coordinated rotations have been absent for the whole
  * safety window. The owner detects that via core's onRotation hook plus
- * `isRotationExternallyDriven()` and marks the state dirty (rebootstrap on
- * reconnect).
+ * `isRotationExternallyDriven()` and marks the state dirty. Dirty does not
+ * interrupt the live engine: it keeps reconnecting/polling and catches up
+ * incrementally (safe — while the coordinator is down, no new revocations
+ * exist), and the snapshot rebootstrap happens on node restart (init).
  */
 export class SyncEngine {
   readonly #options: SyncEngineOptions;

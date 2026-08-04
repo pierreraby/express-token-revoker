@@ -1,2 +1,4 @@
 packages:
   - "packages/*"
+  # Runnable examples (their package.json declares workspace:* deps).
+  - "packages/*/examples/*"

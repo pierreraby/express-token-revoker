@@ -1,6 +1,7 @@
 .env
 node_modules/
 backup/
+certs/
 coverage/
 build/
 *.bak

@@ -2,15 +2,15 @@
   "name": "express-token-revoker-monorepo",
   "version": "0.0.0",
   "private": true,
-  "description": "Monorepo for express-token-revoker — Bloom-filter token revocation for Express: standalone core (published) plus distributed server/node (planned).",
+  "description": "Monorepo for express-token-revoker — Bloom-filter token revocation for Express: standalone core (published) plus distributed server/node (alpha, private).",
   "author": "Pierre Raby",
   "license": "MIT",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "build": "pnpm --filter express-token-revoker build",
-    "test": "pnpm --filter express-token-revoker test",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
     "test:watch": "pnpm --filter express-token-revoker test:watch",
     "test:coverage": "pnpm --filter express-token-revoker test:coverage",
     "start": "pnpm --filter express-token-revoker start",
