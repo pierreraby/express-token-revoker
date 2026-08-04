@@ -7,6 +7,7 @@ import {
   type CoordinatorHandle,
   createCoordinator,
 } from '@express-token-revoker/server';
+import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { expect, vi } from 'vitest';
 import {
   type CoordinatorClientLike,
@@ -18,7 +19,7 @@ import {
   type WireStreamEvent,
 } from '../../src/index.js';
 import type { NodeAuthConfig } from '../../src/validation.js';
-import { createMockLogger } from './mock-logger.js';
+import { createMockLogger, type MockLogger } from './mock-logger.js';
 
 /**
  * Cluster test harness for the distributed integration scenarios
@@ -76,8 +77,12 @@ export interface ClusterNodeOptions {
   nodeId?: string;
   /** Defaults to a fresh temp dir (pass an existing one to restart a node). */
   backupDir?: string;
+  /** Inject a mock logger to assert on log output. */
+  logger?: MockLogger;
   safetyFactor?: number;
   pollIntervalMs?: number;
+  /** Expected coordinator keepalive interval (mirrors the coordinator). */
+  keepaliveIntervalMs?: number;
   /** gRPC auth (PD-1). Defaults to the explicit insecure dev mode. */
   auth?: NodeAuthConfig;
   /** DI wrapper factory — stream gate / corruptor / snapshot spy. */
@@ -151,7 +156,7 @@ export class TestCluster {
     const config = {
       nodeId: options.nodeId ?? `node-${++this.#nodeSeq}`,
       coordinatorAddress: `${secure ? 'localhost' : '127.0.0.1'}:${handle.port}`,
-      logger: createMockLogger(),
+      logger: options.logger ?? createMockLogger(),
       backupDir: options.backupDir ?? this.makeDir('etr-cluster-node-'),
       opaqueHeader: 'Authorization',
       auth: options.auth ?? { mode: 'insecure' },
@@ -163,6 +168,10 @@ export class TestCluster {
         rotateTime: geometry?.rotateTime ?? NO_AUTO_ROTATION_MS,
       },
     } as RevokerNodeConfig;
+    if (options.keepaliveIntervalMs !== undefined) {
+      (config as { keepaliveIntervalMs?: number }).keepaliveIntervalMs =
+        options.keepaliveIntervalMs;
+    }
     const node = await createRevokerNode(
       config,
       options.createClient ? { createClient: options.createClient } : {}
@@ -427,4 +436,64 @@ export function makeSnapshotSpy(): SnapshotSpy {
     },
   };
   return spy;
+}
+
+/**
+ * A stream that is OPEN but delivers nothing — the scenario-7 tool for
+ * simulating a stalled-but-open connection (TCP alive, no events, no
+ * keepalives). The engine's keepalive watchdog must detect the silence.
+ */
+export class StalledStream implements SyncSubscription {
+  cancelled = false;
+
+  on(): this {
+    return this; // listeners registered, never fired
+  }
+
+  cancel(): void {
+    this.cancelled = true;
+  }
+}
+
+/** Result of one middleware probe (opaque-mode request). */
+export type MiddlewareProbe =
+  | { outcome: 'accepted' }
+  | { outcome: 'rejected'; statusCode: number | undefined }
+  | { outcome: 'error'; error: unknown };
+
+/**
+ * Runs the node's opaque middleware once against a fake request carrying
+ * `token` in the Authorization header, and classifies the outcome:
+ * `accepted` (next() called), `rejected` (4xx) or `error` (synchronous
+ * throw — the fail-closed path, mapped to a 500 by Express). No fixed
+ * sleeps: the middleware is fully synchronous on the check path.
+ */
+export function probeMiddleware(middleware: RequestHandler, token: string): MiddlewareProbe {
+  const req = { headers: { authorization: `Bearer ${token}` } };
+  let statusCode: number | undefined;
+  const res = {
+    status(code: number) {
+      statusCode = code;
+      return this;
+    },
+    json() {
+      return this;
+    },
+  };
+  let accepted = false;
+  try {
+    middleware(
+      req as unknown as Request,
+      res as unknown as Response,
+      (() => {
+        accepted = true;
+      }) as NextFunction
+    );
+  } catch (error) {
+    return { outcome: 'error', error };
+  }
+  if (accepted) {
+    return { outcome: 'accepted' };
+  }
+  return { outcome: 'rejected', statusCode };
 }

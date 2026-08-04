@@ -201,7 +201,9 @@ Actée et implémentée : 3 modes pour le lien gRPC coordinateur↔nœuds, confi
 | `mtls` | TLS mutuel (certificat client vérifié) en plus du secret partagé | idem `shared-secret` | idem + `clientCertPath`, `clientKeyPath` | Déploiements zero-trust |
 | `insecure` | Ni TLS ni secret — opt-in explicite, warning au démarrage, bind loopback uniquement refusé au-delà | — | — | Dev/tests uniquement |
 
-Génération du matériel TLS : `node scripts/gen-certs.mjs [--out DIR] [--days N] [--san NAME]...` (nécessite `openssl`). Produit une CA privée (`ca-cert.pem`/`ca-key.pem`), le certificat coordinateur (`server-cert.pem`/`server-key.pem`, SAN `localhost` + `127.0.0.1` + vos `--san`) et un certificat client (`client-cert.pem`/`client-key.pem`, un par nœud en mtls). Les chemins se renseignent dans le bloc `auth` de chaque config — voir les exemples `packages/server/examples/coordinator/` et `packages/node/examples/participant/`. **Ne jamais committer les `*-key.pem`.**
+Si le bloc `auth` est complètement **omis** de la config, le comportement est la posture héritée d'avant PD-1 : **insecure, loopback uniquement, avec un warning sonore au démarrage** — il n'y a PAS de défaut vers `shared-secret` (le défaut `shared-secret` ne s'applique que lorsque le bloc `auth` est présent).
+
+Génération du matériel TLS : `node scripts/gen-certs.mjs [--out DIR] [--days N] [--san NAME]...` (nécessite `openssl`). Produit une CA privée (`ca-cert.pem`/`ca-key.pem`), le certificat coordinateur (`server-cert.pem`/`server-key.pem`, SAN `localhost` + `127.0.0.1` + vos `--san`) et un certificat client (`client-cert.pem`/`client-key.pem`, un par nœud en mtls). Les chemins se renseignent dans le bloc `auth` de chaque config — voir les exemples `packages/server/examples/coordinator/` et `packages/node/examples/participant/`. **Ne jamais committer les clés de déploiement (`*-key.pem` générés par `gen-certs.mjs`)** — les certificats de test du dossier `/fixtures` (racine du dépôt) font exception : ce sont des matériels jetables, générés une seule fois pour les tests, à ne jamais réutiliser en production.
 
 ### Pointeurs
 

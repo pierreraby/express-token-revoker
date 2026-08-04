@@ -56,6 +56,10 @@ The coordinator↔node gRPC link is authenticated (PD-1, decided and
 implemented): `auth.mode` defaults to `shared-secret` (one-way TLS + shared
 secret ≥ 16 chars in gRPC metadata); `mtls` adds mutual TLS; `insecure` is
 development-only — it must be opted into explicitly, logs a loud warning at
-startup and refuses non-loopback binds. `scripts/gen-certs.mjs` generates the
+startup and refuses non-loopback binds. If the `auth` block is completely
+omitted from the config, the coordinator runs the legacy insecure
+loopback-only posture with a loud startup warning — it does NOT default to
+shared-secret, which is the default only when an `auth` block is present.
+`scripts/gen-certs.mjs` generates the
 TLS material. See `docs/distributed-architecture.md` (repo root) for the
 auth table and requirements per mode.

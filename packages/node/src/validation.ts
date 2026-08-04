@@ -72,6 +72,13 @@ interface NodeConfigBase {
   /** Degraded-mode PollDeltas cadence in ms. Defaults to 2000. */
   pollIntervalMs?: number;
   /**
+   * Expected coordinator keepalive interval in ms — must mirror the
+   * coordinator's `keepaliveIntervalMs`. The sync engine force-reconnects
+   * a stream that stays silent for 3 intervals (stalled-stream detection).
+   * Defaults to 5000.
+   */
+  keepaliveIntervalMs?: number;
+  /**
    * Degraded self-rotation safety factor (>= 2): the node's core
    * rotateTime = coordinator rotateTime × safetyFactor. Defaults to 2.5.
    */
@@ -149,6 +156,7 @@ export const nodeInputSchema = Joi.object({
   logger: loggerSchema.optional(),
   backupDir: Joi.string().min(1).required(),
   pollIntervalMs: Joi.number().integer().min(100).optional(),
+  keepaliveIntervalMs: Joi.number().integer().min(100).optional(),
   safetyFactor: Joi.number().min(2).optional(),
   auth: nodeAuthSchema.optional(),
   claimsToCheck: Joi.array().items(Joi.string().min(1)).min(1).optional(),

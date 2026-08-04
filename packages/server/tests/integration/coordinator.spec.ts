@@ -149,6 +149,12 @@ describe('Coordinator distributed service (integration, port 0)', () => {
     const { client } = await start({ keepaliveIntervalMs: 150 });
 
     const stream = client.subscribe({ nodeId: 'node-a', lastLsn: '0' });
+    // Post-drain marker keepalive first (empty backlog here), with the
+    // coordinator lag fields populated (M3).
+    const marker = await collectStreamEvents(stream, 1);
+    expect(marker[0].event).toBe('keepalive');
+    expect(marker[0].keepalive).toMatchObject({ coordinatorLastLsn: '0', generation: 0 });
+
     // The backlog drain task is enqueued synchronously on Subscribe; a short
     // settle keeps the test independent of drain-vs-live interleaving.
     const addResults = [];
@@ -156,16 +162,18 @@ describe('Coordinator distributed service (integration, port 0)', () => {
       addResults.push(await client.add({ nodeId: 'admin', item }));
     }
 
-    const events = await collectStreamEvents(stream, 3);
+    const events = await collectStreamEvents(stream, 3, 10000, (e) => e.event !== 'keepalive');
     expect(events.map((e) => e.event)).toEqual(['entry', 'entry', 'entry']);
     expect(events.map((e) => e.entry?.item)).toEqual(['tok-1', 'tok-2', 'tok-3']);
     expect(events.map((e) => Number(e.entry?.lsn))).toEqual([1, 2, 3]);
     // LSNs in the stream match the LSNs returned by the admin RPC.
     expect(addResults.map((r) => Number(r.lsn))).toEqual([1, 2, 3]);
 
-    // Keepalives flow on the open stream (zombie detection).
+    // Keepalives flow on the open stream (zombie detection), lag fields
+    // populated with the coordinator's CURRENT state.
     const withKeepalive = await collectStreamEvents(stream, 1);
     expect(withKeepalive[0].event).toBe('keepalive');
+    expect(withKeepalive[0].keepalive).toMatchObject({ coordinatorLastLsn: '3', generation: 0 });
 
     // The node shows up in ListNodes with delivery progress.
     const list = await client.listNodes();
@@ -190,6 +198,16 @@ describe('Coordinator distributed service (integration, port 0)', () => {
 
     const second = client.subscribe({ nodeId: 'node-a', lastLsn: '0' });
     await waitForStreamError(second, grpc.status.ALREADY_EXISTS);
+
+    // The duplicate rejection must not leak into the ORIGINAL registration:
+    // the first stream keeps receiving live events (post-drain marker
+    // keepalive first, then the entry).
+    await client.add({ item: 'dup-live' });
+    const live = await collectStreamEvents(first, 1, 10000, (e) => e.event !== 'keepalive');
+    expect(live[0].entry?.item).toBe('dup-live');
+    const list = await client.listNodes();
+    expect(list.nodes).toHaveLength(1);
+    expect(list.nodes[0]).toMatchObject({ nodeId: 'node-a', connected: true });
     cancelStream(first);
   });
 
@@ -197,6 +215,10 @@ describe('Coordinator distributed service (integration, port 0)', () => {
     const { handle, client } = await start();
 
     const stream = client.subscribe({ nodeId: 'node-a', lastLsn: '0' });
+    // Post-drain marker keepalive first (empty backlog).
+    const marker = await collectStreamEvents(stream, 1);
+    expect(marker[0].event).toBe('keepalive');
+
     await client.add({ item: 'pre-rot-1' });
     await client.add({ item: 'pre-rot-2' });
 
@@ -206,7 +228,7 @@ describe('Coordinator distributed service (integration, port 0)', () => {
 
     await client.add({ item: 'post-rot-1' });
 
-    const events = await collectStreamEvents(stream, 4);
+    const events = await collectStreamEvents(stream, 4, 10000, (e) => e.event !== 'keepalive');
     expect(events.map((e) => e.event)).toEqual(['entry', 'entry', 'rotate', 'entry']);
     expect(events[0].entry?.item).toBe('pre-rot-1');
     expect(events[1].entry?.item).toBe('pre-rot-2');
@@ -337,6 +359,18 @@ describe('Coordinator distributed service (integration, port 0)', () => {
     // The logger never saw a raw item.
     const logged = [...logger.error.mock.calls, ...logger.warn.mock.calls].flat().join(' ');
     expect(logged).not.toContain('bad\nitem');
+  });
+
+  it('rejects Add with a missing or malformed nodeId (audit field)', async () => {
+    const { client } = await start();
+
+    // Empty (proto default when omitted) and outside the id pattern.
+    await expect(client.add({ nodeId: '', item: 'x' })).rejects.toMatchObject({
+      code: grpc.status.INVALID_ARGUMENT,
+    });
+    await expect(client.add({ nodeId: 'bad id', item: 'x' })).rejects.toMatchObject({
+      code: grpc.status.INVALID_ARGUMENT,
+    });
   });
 
   it('restart resumes LSN numbering and serves catch-up from the consistency point', async () => {

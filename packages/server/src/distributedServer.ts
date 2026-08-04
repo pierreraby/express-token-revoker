@@ -109,7 +109,12 @@ function outboundToStreamEvent(event: OutboundEvent): Record<string, unknown> | 
     case 'rotate':
       return { rotate: { lsn: String(event.lsn), generation: event.generation } };
     case 'keepalive':
-      return { keepalive: {} };
+      return {
+        keepalive: {
+          coordinatorLastLsn: String(event.coordinatorLastLsn),
+          generation: event.generation,
+        },
+      };
     case 'resnapshot':
       return { resnapshot: { generation: event.generation } };
     default:
@@ -155,17 +160,31 @@ class NodeConnectionImpl implements NodeConnection {
   }
 
   /**
-   * Starts the periodic keepalive on this stream.
+   * Starts the periodic keepalive on this stream. Each keepalive carries
+   * the coordinator's CURRENT lastLsn/generation (proto lag hints — read
+   * at send time through `coordinatorState`).
    */
-  startKeepalive(intervalMs: number): void {
+  startKeepalive(
+    intervalMs: number,
+    coordinatorState: () => { coordinatorLastLsn: number; generation: number }
+  ): void {
     this.#keepaliveTimer = setInterval(() => {
-      this.enqueue({ kind: 'keepalive' });
+      let state: { coordinatorLastLsn: number; generation: number };
+      try {
+        state = coordinatorState();
+      } catch {
+        // Coordinator mid-shutdown — stop enriching, still keep alive.
+        state = { coordinatorLastLsn: 0, generation: 0 };
+      }
+      this.enqueue({ kind: 'keepalive', ...state });
       try {
         this.#registry.touch(this.nodeId);
       } catch {
         // Registry destroyed during shutdown — keepalives stop anyway.
       }
     }, intervalMs);
+    // The keepalive timer must never hold a process open (tests / CLI).
+    this.#keepaliveTimer.unref();
   }
 
   /**
@@ -252,6 +271,24 @@ class NodeConnectionImpl implements NodeConnection {
 
   get closed(): boolean {
     return this.#closed;
+  }
+
+  /**
+   * Terminates a connection that was REJECTED before registration (the
+   * duplicate-Subscribe path): marks it closed and ends the call WITHOUT
+   * running the registry cleanup — the original active registration owns
+   * the nodeId and must stay untouched.
+   */
+  abortUnregistered(): void {
+    if (this.#closed) {
+      return;
+    }
+    this.#closed = true;
+    try {
+      this.#call.end();
+    } catch {
+      // The call may already be dead — closing must never throw.
+    }
   }
 
   close(): void {
@@ -469,7 +506,7 @@ export class DistributedServer {
 
     const validateNodeId = (nodeId: unknown): string | null => {
       if (typeof nodeId !== 'string' || !idPattern.test(nodeId)) {
-        return 'nodeId must match [a-zA-Z0-9][a-zA-Z0-9_-]{0,63}';
+        return null;
       }
       return nodeId;
     };
@@ -477,12 +514,24 @@ export class DistributedServer {
     const handlers: grpc.UntypedServiceImplementation = {
       /**
        * Admin revocation — canonical-first (see Coordinator.add).
+       * `nodeId` identifies the admin caller (audit/traceability) and is
+       * validated like every other id on the wire.
        */
       Add: (call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>): void => {
+        const nodeId = validateNodeId(call.request?.nodeId);
+        if (!nodeId) {
+          callback({
+            code: grpc.status.INVALID_ARGUMENT,
+            message: 'nodeId must match [a-zA-Z0-9][a-zA-Z0-9_-]{0,63}',
+          });
+          return;
+        }
         const item = call.request?.item;
         try {
           const result = coordinator.add(item);
-          // Never log the raw item — it is a bearer secret.
+          // Never log the raw item — it is a bearer secret. The audit
+          // trail keeps the caller id + the assigned LSN only.
+          logger.info(`Add from ${nodeId}: lsn=${result.lsn}, success=${result.success}`);
           callback(null, {
             success: result.success,
             message: result.message,
@@ -493,7 +542,7 @@ export class DistributedServer {
             callback({ code: grpc.status.INVALID_ARGUMENT, message: error.message });
             return;
           }
-          logger.error(`Coordinator Add failed: ${(error as Error).message}`);
+          logger.error(`Coordinator Add failed (caller ${nodeId}): ${(error as Error).message}`);
           callback({ code: grpc.status.INTERNAL, message: (error as Error).message });
         }
       },
@@ -622,10 +671,19 @@ export class DistributedServer {
           registry.registerNode(nodeId, connection);
         } catch (error) {
           // Duplicate active stream for this nodeId — operator error.
+          // Reject the duplicate and clean up ITS call without touching
+          // the original registration (no registry cleanup here). The
+          // error emit sets the status AND ends the call (grpc-js maps
+          // 'error' to pendingStatus + end) — abortUnregistered then only
+          // marks the connection closed (its end() is a no-op at that
+          // point), so it must run AFTER the emit.
+          call.on('cancelled', () => connection.abortUnregistered());
+          call.on('close', () => connection.abortUnregistered());
           call.emit('error', {
             code: grpc.status.ALREADY_EXISTS,
             message: (error as Error).message,
           });
+          connection.abortUnregistered();
           return;
         }
 
@@ -651,7 +709,20 @@ export class DistributedServer {
           }
         });
 
-        connection.startKeepalive(keepaliveIntervalMs);
+        // Post-drain marker: this keepalive is serialized on the node's
+        // single-writer chain AFTER the backlog drain — receiving it proves
+        // the node got the whole backlog. Nodes gate fail-closed on it
+        // after a (re)bootstrap (until then their tail state is incomplete).
+        connection.enqueue({
+          kind: 'keepalive',
+          coordinatorLastLsn: coordinator.lastLsn,
+          generation: coordinator.generation,
+        });
+
+        connection.startKeepalive(keepaliveIntervalMs, () => ({
+          coordinatorLastLsn: coordinator.lastLsn,
+          generation: coordinator.generation,
+        }));
 
         call.on('cancelled', () => connection.close());
         call.on('close', () => connection.close());

@@ -47,6 +47,14 @@ export interface SyncEngineOptions {
   initialGeneration: number;
   /** Degraded-mode poll cadence. Defaults to 2000 ms. */
   pollIntervalMs?: number;
+  /**
+   * Expected coordinator keepalive interval (must mirror the coordinator's
+   * `keepaliveIntervalMs`). Defaults to 5000 ms. A stream that delivers NO
+   * event for {@link MISSED_KEEPALIVES} intervals is treated as stalled and
+   * force-reconnected (fail-closed — a stalled-but-open stream must never
+   * mask a degraded node).
+   */
+  keepaliveIntervalMs?: number;
   /** Max events per PollDeltas page. Defaults to 1000. */
   maxPollEvents?: number;
   /** First reconnect delay. Defaults to 1000 ms. */
@@ -60,12 +68,27 @@ export interface SyncEngineOptions {
    * activity after firing it.
    */
   onRebootstrapRequired?: (reason: string) => void;
+  /**
+   * Fired when a Keepalive event arrives on the live stream. Thanks to the
+   * coordinator's single-writer delivery chain, the first keepalive after a
+   * Subscribe is serialized AFTER the whole backlog drain — the owner uses
+   * it as the "caught up" signal to release its fail-closed serving gate
+   * after a (re)bootstrap.
+   */
+  onKeepaliveReceived?: () => void;
   /** Test seam: replaces the reconnect backoff sleep. */
   delayFn?: (ms: number) => Promise<void>;
 }
 
 /** Hard cap on poll pagination within one poll tick. */
 const MAX_POLL_PAGES = 100;
+
+/**
+ * Consecutive silent keepalive intervals tolerated on an open stream before
+ * it is declared stalled and force-reconnected (distributed.proto Keepalive
+ * contract: "receivers force a reconnect after several missed keepalives").
+ */
+const MISSED_KEEPALIVES = 3;
 
 /** Jitter applied to reconnect delays (±20%). */
 function withJitter(delayMs: number): number {
@@ -98,10 +121,15 @@ function withJitter(delayMs: number): number {
  * rotateTime = coordinatorRotateTime × safetyFactor, so its own interval
  * fires only when coordinated rotations have been absent for the whole
  * safety window. The owner detects that via core's onRotation hook plus
- * `isRotationExternallyDriven()` and marks the state dirty. Dirty does not
- * interrupt the live engine: it keeps reconnecting/polling and catches up
- * incrementally (safe — while the coordinator is down, no new revocations
- * exist), and the snapshot rebootstrap happens on node restart (init).
+ * `isRotationExternallyDriven()` and marks the state dirty + forces a
+ * snapshot rebootstrap (a core-timer rotation is NEVER externally driven —
+ * even on an apparently open stream, which may be stalled).
+ *
+ * Stalled-stream detection: while streaming, a watchdog requires at least
+ * one event (any kind — the coordinator sends keepalives unconditionally)
+ * every `MISSED_KEEPALIVES × keepaliveIntervalMs`. Silence beyond that
+ * means the stream is stalled-but-open ⇒ treated exactly like a stream
+ * failure (degraded mode: backoff reconnects + poll fallback).
  */
 export class SyncEngine {
   readonly #options: SyncEngineOptions;
@@ -115,8 +143,13 @@ export class SyncEngine {
   #mode: SyncEngineMode = 'idle';
   #lastAppliedLsn: number;
   #generation: number;
+  #keepaliveIntervalMs: number;
   #stream: SyncSubscription | null = null;
   #pollTimer: NodeJS.Timeout | null = null;
+  /** Stalled-stream watchdog (runs while streaming). */
+  #keepaliveWatchdog: NodeJS.Timeout | null = null;
+  /** Epoch ms of the last event received on the live stream (any kind). */
+  #lastStreamActivityAt = 0;
   /** Monotonic token invalidating pending reconnect sleeps on transitions. */
   #scheduleToken = 0;
   #reconnectAttempt = 0;
@@ -134,6 +167,7 @@ export class SyncEngine {
     this.#lastAppliedLsn = options.initialLsn;
     this.#generation = options.initialGeneration;
     this.#pollIntervalMs = options.pollIntervalMs ?? 2000;
+    this.#keepaliveIntervalMs = options.keepaliveIntervalMs ?? 5000;
     this.#maxPollEvents = options.maxPollEvents ?? 1000;
     this.#baseReconnectDelayMs = options.baseReconnectDelayMs ?? 1000;
     this.#maxReconnectDelayMs = options.maxReconnectDelayMs ?? 30_000;
@@ -159,14 +193,15 @@ export class SyncEngine {
   }
 
   /**
-   * Whether the next core rotation is coordinator-driven (stream event or
-   * poll-delivered Rotate being applied right now, or a healthy stream that
-   * delivers rotations on schedule). The owner's onRotation hook uses this
-   * to detect degraded SELF-rotation: when false, core rotated on its own
-   * safety timer while disconnected ⇒ state must be marked dirty.
+   * Whether the current core rotation is coordinator-driven — true ONLY
+   * while a coordinated Rotate event (stream or poll) is being applied.
+   * Merely being connected is NOT enough: a stalled-but-open stream
+   * delivers nothing, so a core-timer rotation during `streaming` is by
+   * definition a SELF-rotation. The owner's onRotation hook uses this to
+   * detect degraded self-rotation ⇒ dirty + forced rebootstrap.
    */
   isRotationExternallyDriven(): boolean {
-    return this.#mode === 'streaming' || this.#inCoordinatedRotation;
+    return this.#inCoordinatedRotation;
   }
 
   /** Opens the replication stream. */
@@ -189,6 +224,7 @@ export class SyncEngine {
     this.#mode = 'stopped';
     this.#scheduleToken++; // invalidate any pending reconnect sleep
     this.#stopPolling();
+    this.#stopKeepaliveWatchdog();
     this.#dropStream();
     await this.#chain;
   }
@@ -213,10 +249,13 @@ export class SyncEngine {
       this.#mode = 'streaming';
       this.#reconnectAttempt = 0;
       this.#stopPolling();
+      this.#startKeepaliveWatchdog();
       this.#logger.info(
         `Node ${this.#options.nodeId}: replication stream established at lsn ${this.#lastAppliedLsn}`
       );
       stream.on('data', (event) => {
+        // Any event (entries, rotations, keepalives) proves liveness.
+        this.#lastStreamActivityAt = Date.now();
         void this.#enqueueApply(event);
       });
       stream.on('error', (error) => {
@@ -277,6 +316,40 @@ export class SyncEngine {
       }
       return this.#trySubscribe();
     });
+  }
+
+  /**
+   * Stalled-stream watchdog: while streaming, at least one event must
+   * arrive within MISSED_KEEPALIVES × keepaliveIntervalMs (the coordinator
+   * sends keepalives unconditionally, so silence means the stream is
+   * stalled-but-open). A stalled stream is treated exactly like a stream
+   * failure — fail-closed, never a silent degraded node.
+   */
+  #startKeepaliveWatchdog(): void {
+    this.#stopKeepaliveWatchdog();
+    this.#lastStreamActivityAt = Date.now();
+    this.#keepaliveWatchdog = setInterval(() => {
+      if (this.#stopped || this.#mode !== 'streaming' || !this.#stream) {
+        return;
+      }
+      const silentForMs = Date.now() - this.#lastStreamActivityAt;
+      if (silentForMs > MISSED_KEEPALIVES * this.#keepaliveIntervalMs) {
+        const stream = this.#stream;
+        this.#logger.warn(
+          `Node ${this.#options.nodeId}: no stream activity for ${silentForMs} ms ` +
+            `(> ${MISSED_KEEPALIVES} keepalive intervals of ${this.#keepaliveIntervalMs} ms) ` +
+            '— stalled stream detected, force-reconnecting'
+        );
+        this.#handleStreamDown(stream, 'stalled stream (missed keepalives)');
+      }
+    }, this.#keepaliveIntervalMs);
+  }
+
+  #stopKeepaliveWatchdog(): void {
+    if (this.#keepaliveWatchdog) {
+      clearInterval(this.#keepaliveWatchdog);
+      this.#keepaliveWatchdog = null;
+    }
   }
 
   #startPolling(): void {
@@ -352,8 +425,14 @@ export class SyncEngine {
       return;
     }
     const kind = event.event;
-    if (!kind || kind === 'keepalive') {
-      return; // liveness only
+    if (!kind) {
+      return;
+    }
+    if (kind === 'keepalive') {
+      // Liveness only — the watchdog consumes the arrival; the owner
+      // consumes the delivery (post-backlog catch-up marker).
+      this.#options.onKeepaliveReceived?.();
+      return;
     }
     if (kind === 'resnapshot') {
       this.#rebootstrap('coordinator sent ResnapshotRequired (retention floor exceeded)');
@@ -419,8 +498,21 @@ export class SyncEngine {
     }
 
     // Persist AFTER apply — the ordering contract (see StateFile). The
-    // engine never touches `dirty`: only the owner sets/clears it.
-    this.#options.stateStore.update({ lastLsn: lsn, generation: this.#generation });
+    // engine never touches `dirty`: only the owner sets/clears it. A
+    // persistence failure must NEVER stall the apply chain (every later
+    // event would then be silently skipped): the entry is already applied
+    // in memory, so rebootstrap from the snapshot is the correct
+    // fail-closed recovery (it will be re-applied from the tail).
+    try {
+      this.#options.stateStore.update({ lastLsn: lsn, generation: this.#generation });
+    } catch (error) {
+      this.#logger.error(
+        `Node ${this.#options.nodeId}: failed to persist sync state at lsn ${lsn}: ` +
+          `${(error as Error).message}`
+      );
+      this.#rebootstrap('sync-state persistence failed (never stall the apply chain)');
+      return;
+    }
     this.#lastAppliedLsn = lsn;
   }
 

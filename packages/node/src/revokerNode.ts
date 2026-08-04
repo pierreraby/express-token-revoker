@@ -22,6 +22,7 @@ import type { RevokerNodeConfig } from './validation.js';
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 const DEFAULT_SAFETY_FACTOR = 2.5;
 const DEFAULT_BACKUP_RATIO_TIME = 2;
+const DEFAULT_KEEPALIVE_INTERVAL_MS = 5000;
 /** Rebootstrap retry backoff bounds (coordinator unreachable while resyncing). */
 const REBOOTSTRAP_MIN_RETRY_MS = 1000;
 const REBOOTSTRAP_MAX_RETRY_MS = 30_000;
@@ -57,7 +58,7 @@ export interface SyncHealthComponent extends HealthCheckComponent {
   mode: 'bootstrap' | 'streaming' | 'poll';
   /** Highest replication LSN applied and persisted. */
   lastAppliedLsn: number;
-  /** True after a degraded self-rotation (snapshot rebootstrap on next restart). */
+  /** True after a degraded self-rotation (immediate rebootstrap pending). */
   dirty: boolean;
 }
 
@@ -85,17 +86,25 @@ export interface NodeHealthStatus {
  *   New revocations are refused — `add()` always throws (coordinator-only).
  * - **Degraded self-rotation**: core runs with
  *   `rotateTime = coordinatorRotateTime × safetyFactor`; a rotation with no
- *   coordinated event in that window means core's own timer fired ⇒ the
- *   node marks itself dirty. This does NOT rebootstrap the live node: the
- *   sync engine keeps catching up incrementally on reconnect (safe — no new
- *   revocations exist while the coordinator is down), and the snapshot
- *   rebootstrap happens on the next restart.
+ *   coordinated Rotate event in that window means core's own timer fired
+ *   (coordinator down OR stream stalled) ⇒ the node marks itself dirty
+ *   (persisted, so a restart re-bootstraps too) and IMMEDIATELY schedules a
+ *   snapshot rebootstrap — fail-closed: a self-rotation can diverge from
+ *   the coordinator's rotation schedule, so the node never keeps serving
+ *   incrementally on top of it.
  * - **Never drop a delta**: LSN gaps, generation mismatches or
  *   `ResnapshotRequired` trigger a loud rebootstrap from the snapshot.
  *
  * Rebootstrap swap window: while re-bootstrapping, the local revoker is
- * destroyed before the replacement is constructed. Checks landing in that
- * short window throw (middleware ⇒ 500) — fail-closed, never under-revoke.
+ * nulled BEFORE being destroyed and the replacement is only published once
+ * constructed. `getMiddleware()` re-resolves the current revoker on every
+ * request, so checks landing in that window throw (middleware ⇒ 500) —
+ * fail-closed, never under-revoke. The same applies during shutdown and
+ * during the post-bootstrap catch-up: after a snapshot (re)bootstrap the
+ * tail since the consistency point has not been replayed yet, so checks
+ * keep throwing until the first keepalive arrives on the new stream —
+ * the coordinator serializes it AFTER the backlog drain on its
+ * single-writer chain, so receiving it proves the node is fully caught up.
  */
 export class RevokerNode {
   readonly #config: RevokerNodeConfig;
@@ -110,7 +119,16 @@ export class RevokerNode {
   #engine: SyncEngine | null = null;
   #dirty = false;
   #bootstrapping = false;
+  /**
+   * Fail-closed serving gate after a snapshot (re)bootstrap: true until the
+   * first keepalive arrives on the new stream (the coordinator's post-drain
+   * marker — proof the backlog has been fully replayed). While set, checks
+   * throw instead of serving a filter that is missing the tail.
+   */
+  #catchingUp = false;
   #rebootstrapTimer: NodeJS.Timeout | null = null;
+  /** True while a rebootstrap is queued or running (dedup guard). */
+  #rebootstrapPending = false;
   #shuttingDown = false;
 
   constructor(config: RevokerNodeConfig, deps: NodeDependencies = {}) {
@@ -121,7 +139,6 @@ export class RevokerNode {
     this.#pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.#deps = deps;
   }
-
   get nodeId(): string {
     return this.#config.nodeId;
   }
@@ -165,17 +182,35 @@ export class RevokerNode {
     await this.#bootstrapFromSnapshot();
   }
 
-  /** Express middleware from core — checks the LOCAL filter. */
+  /**
+   * Express middleware checking the LOCAL filter.
+   *
+   * Returns a wrapper that RE-RESOLVES the current revoker on every
+   * request (never a closure over one manager instance): a hot rebootstrap
+   * destroys the old revoker and installs a replacement, and a handler
+   * captured before the swap must keep tracking the live revoker. During
+   * the swap window (revoker nulled, replacement not yet constructed) and
+   * during shutdown the wrapper THROWS — Express maps the synchronous throw
+   * to a 500. Fail-closed: ambiguity never becomes an accept.
+   */
   getMiddleware(): RequestHandler {
     if (!this.#revoker) {
       throw new InternalError('Node revoker is not initialized');
     }
-    return this.#revoker.getMiddleware();
+    return (req, res, next) => {
+      const revoker = this.#revoker;
+      if (!revoker || this.#shuttingDown || this.#catchingUp) {
+        throw new InternalError(
+          'Node revoker is unavailable (shutting down, re-bootstrapping or catching up) — failing closed'
+        );
+      }
+      revoker.getMiddleware()(req, res, next);
+    };
   }
 
   /** Local revocation check (never contacts the coordinator). */
   has(item: string): boolean {
-    if (!this.#revoker) {
+    if (!this.#revoker || this.#shuttingDown || this.#catchingUp) {
       throw new InternalError(
         'Node revoker is not initialized (possibly re-bootstrapping — retry shortly)'
       );
@@ -252,6 +287,7 @@ export class RevokerNode {
     }
     this.#shuttingDown = true;
     this.#clearRebootstrapTimer();
+    this.#rebootstrapPending = false;
     if (this.#engine) {
       await this.#engine.stop();
       this.#engine = null;
@@ -312,14 +348,23 @@ export class RevokerNode {
       const snapshot = await this.#client.getSnapshot();
       this.#validateSnapshotGeometry(snapshot);
 
-      // Stop replication activity and the old revoker before touching files.
+      // From this point the local state is being rebuilt: gate the serving
+      // path fail-closed until the new stream proves full catch-up (the
+      // coordinator's post-drain keepalive marker).
+      this.#catchingUp = true;
+
+      // Stop replication activity and the old revoker before touching
+      // files. The revoker is nulled BEFORE destroy: every resolution path
+      // (middleware wrapper, has()) must fail closed the instant the swap
+      // starts — a destroyed manager's has() returns false (fail-open).
       if (this.#engine) {
         await this.#engine.stop();
         this.#engine = null;
       }
       if (this.#revoker) {
-        await this.#revoker.destroy();
+        const oldRevoker = this.#revoker;
         this.#revoker = null;
+        await oldRevoker.destroy();
       }
 
       this.#wipeBackupFiles();
@@ -442,9 +487,13 @@ export class RevokerNode {
 
   /**
    * Core rotation observer. Coordinated rotations (stream or poll) are
-   * flagged by the engine; anything else while the engine exists is a
-   * degraded SELF-rotation ⇒ mark dirty (snapshot rebootstrap on next
-   * restart).
+   * flagged by the engine (`#inCoordinatedRotation`); anything else is a
+   * degraded SELF-rotation — even while the engine believes it is
+   * streaming, since a stalled-but-open stream delivers nothing. The node
+   * marks itself dirty (persisted ⇒ a restart re-bootstraps too) and
+   * immediately schedules a snapshot rebootstrap: continuing to serve on
+   * top of a self-rotation risks diverging from the coordinator's rotation
+   * schedule (double-rotation ⇒ evicted coverage) — fail-closed.
    */
   #onCoreRotation(): void {
     if (this.#shuttingDown) {
@@ -453,12 +502,22 @@ export class RevokerNode {
     if (this.#engine?.isRotationExternallyDriven()) {
       return;
     }
-    this.#logger.warn(
-      `Node ${this.#config.nodeId}: degraded self-rotation detected — ` +
-        'marking sync state dirty (snapshot rebootstrap on next restart)'
+    this.#logger.error(
+      `Node ${this.#config.nodeId}: DEGRADED SELF-ROTATION detected — core's safety timer ` +
+        'fired without a coordinated Rotate event (coordinator down or stalled stream). ' +
+        'Marking sync state DIRTY and forcing a snapshot rebootstrap.'
     );
     this.#dirty = true;
-    this.#stateFile?.update({ dirty: true });
+    try {
+      this.#stateFile?.update({ dirty: true });
+    } catch (error) {
+      // The live rebootstrap below still heals the node; persistence
+      // failure only degrades the restart path — never stay silent.
+      this.#logger.error(
+        `Node ${this.#config.nodeId}: failed to persist the dirty flag: ${(error as Error).message}`
+      );
+    }
+    this.#scheduleRebootstrap(0);
   }
 
   #startEngine(lastLsn: number, generation: number): void {
@@ -479,7 +538,17 @@ export class RevokerNode {
       initialLsn: lastLsn,
       initialGeneration: generation,
       pollIntervalMs: this.#pollIntervalMs,
+      keepaliveIntervalMs: this.#config.keepaliveIntervalMs ?? DEFAULT_KEEPALIVE_INTERVAL_MS,
       onRebootstrapRequired: (reason) => this.#onRebootstrapRequired(reason),
+      onKeepaliveReceived: () => {
+        // The coordinator serializes the first keepalive AFTER the backlog
+        // drain on the node's delivery chain — receiving it proves the tail
+        // has been replayed: release the fail-closed serving gate.
+        if (this.#catchingUp) {
+          this.#catchingUp = false;
+          this.#logger.info(`Node ${this.#config.nodeId}: backlog caught up — serving checks`);
+        }
+      },
     });
     this.#engine.start();
   }
@@ -493,16 +562,28 @@ export class RevokerNode {
     this.#scheduleRebootstrap(0);
   }
 
-  /** Rebootstrap with bounded retry backoff (coordinator may be flapping). */
+  /**
+   * Rebootstrap with bounded retry backoff (coordinator may be flapping).
+   * Deduplicated: at most one queued/in-flight rebootstrap at a time —
+   * repeated anomalies (e.g. successive degraded self-rotations during a
+   * long outage) must not stack concurrent bootstraps.
+   */
   #scheduleRebootstrap(delayMs: number): void {
+    if (this.#shuttingDown || this.#rebootstrapPending || this.#bootstrapping) {
+      return; // already queued or running
+    }
+    this.#rebootstrapPending = true;
     this.#clearRebootstrapTimer();
     this.#rebootstrapTimer = setTimeout(async () => {
       if (this.#shuttingDown) {
+        this.#rebootstrapPending = false;
         return;
       }
       try {
         await this.#bootstrapFromSnapshot();
+        this.#rebootstrapPending = false;
       } catch (error) {
+        this.#rebootstrapPending = false;
         const retryDelay = Math.min(
           Math.max(delayMs, REBOOTSTRAP_MIN_RETRY_MS) * 2,
           REBOOTSTRAP_MAX_RETRY_MS

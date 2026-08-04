@@ -24,7 +24,12 @@ path never talks to the coordinator.
   (degraded mode); new revocations are refused — call the coordinator.
 - Degraded self-rotation exists only as a safety timeout
   (`rotateTime × safetyFactor`); it marks the node `dirty` ⇒ full
-  rebootstrap on reconnect.
+  rebootstrap on restart.
+
+If the `auth` block is omitted from the config, the node falls back to the
+legacy insecure posture (plaintext, no secret) with a loud startup warning
+— it does NOT default to shared-secret, which is the default only when an
+`auth` block is present.
 
 ## Quickstart
 

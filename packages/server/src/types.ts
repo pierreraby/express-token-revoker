@@ -47,7 +47,13 @@ export interface MetaState {
 export type OutboundEvent =
   | { kind: 'entry'; lsn: number; generation: number; item: string }
   | { kind: 'rotate'; lsn: number; generation: number }
-  | { kind: 'keepalive' }
+  | {
+      kind: 'keepalive';
+      /** Coordinator's current lastLsn (lag hint for receivers). */
+      coordinatorLastLsn: number;
+      /** Coordinator's current generation (lag hint for receivers). */
+      generation: number;
+    }
   | { kind: 'resnapshot'; generation: number };
 
 /**

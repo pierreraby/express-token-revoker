@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CoordinatorClient } from '../../src/index.js';
-import { makeSnapshotSpy, StreamCorruptor, StreamGate, TestCluster } from '../helpers/cluster.js';
+import { CoordinatorClient, type CoordinatorClientLike } from '../../src/index.js';
+import {
+  makeSnapshotSpy,
+  probeMiddleware,
+  StalledStream,
+  StreamCorruptor,
+  StreamGate,
+  TestCluster,
+} from '../helpers/cluster.js';
+import { createMockLogger } from '../helpers/mock-logger.js';
 
 /**
  * Distributed cluster scenarios — THE PROOF.
@@ -313,5 +321,183 @@ describe('Distributed cluster scenarios (integration, real coordinator + nodes)'
     );
     expect(corruptor.injected).toBe(true);
     expect(node.healthCheck().healthy).toBe(true);
+  });
+
+  it('scenario 7 — stalled-but-open stream: missed keepalives ⇒ degraded ⇒ dirty self-rotation ⇒ rebootstrap, never a silent accept', async () => {
+    const cluster = track(new TestCluster());
+    // Fast coordinator rotations + keepalives so the whole degraded path
+    // runs inside the test window; the node mirrors the keepalive cadence.
+    // rotateTime 1.5 s: a token survives >= 3 s (two rotations) — the
+    // post-heal convergence assertions below run well inside that bound.
+    const handle = await cluster.startCoordinator({
+      rotateTime: 1_500,
+      keepaliveIntervalMs: 200,
+    });
+    const logger = createMockLogger();
+    // Holds the LIVE stream's events (including keepalives) once paused —
+    // the stalled-but-open simulation. New calls are blocked separately.
+    const gate = new StreamGate();
+    let stalled = false;
+    const node = await cluster.startNode(handle, {
+      logger,
+      safetyFactor: 2, // node core rotateTime = 3 s (self-rotation window)
+      pollIntervalMs: 200,
+      keepaliveIntervalMs: 200,
+      createClient: (options) => {
+        const real = new CoordinatorClient(options);
+        const blocking: CoordinatorClientLike = {
+          getSnapshot: () => (stalled ? Promise.reject(new Error('stalled')) : real.getSnapshot()),
+          // Stalled-but-open: Subscribe succeeds, the stream never delivers.
+          subscribe: (lastLsn) =>
+            stalled ? Promise.resolve(new StalledStream()) : real.subscribe(lastLsn),
+          pollDeltas: (fromLsn, maxEvents) =>
+            stalled ? Promise.reject(new Error('stalled')) : real.pollDeltas(fromLsn, maxEvents),
+          close: () => real.close(),
+        };
+        return gate.wrapClient(blocking);
+      },
+    });
+    await cluster.waitForStreaming(node);
+    const middleware = node.getMiddleware();
+
+    handle.coordinator.add('stall-a');
+    await vi.waitFor(
+      () => expect(probeMiddleware(middleware, 'stall-a').outcome).toBe('rejected'),
+      { timeout: 5000 }
+    );
+
+    // Stall the stream while the coordinator keeps living (rotating,
+    // revoking): the open stream delivers nothing anymore and every new
+    // call fails. The keepalive watchdog must detect the silence (3 missed
+    // intervals) and degrade the node — a silent stream is never trusted.
+    stalled = true;
+    gate.pause();
+    await vi.waitFor(() => expect(node.healthCheck().checks.sync.connected).toBe(false), {
+      timeout: 8000,
+    });
+
+    handle.coordinator.add('stall-b');
+
+    // After the safety window (rotateTime × safetyFactor = 3 s) without any
+    // coordinated Rotate reaching the node, core's own timer self-rotates ⇒
+    // LOUD dirty flag + forced rebootstrap (which fails while stalled and
+    // retries with backoff — dirty stays set the whole time).
+    await vi.waitFor(() => expect(node.healthCheck().checks.sync.dirty).toBe(true), {
+      timeout: 10000,
+    });
+    const logged = logger.error.mock.calls.flat().join(' ');
+    expect(logged).toMatch(/DEGRADED SELF-ROTATION/);
+
+    // FAIL-CLOSED INVARIANT: degraded and self-rotated, the node STILL
+    // rejects the pre-stall revocation — no silent acceptance window.
+    expect(probeMiddleware(middleware, 'stall-a').outcome).toBe('rejected');
+    expect(node.has('stall-a')).toBe(true);
+
+    // Heal: revoke one more token right before healing — it is fresh at
+    // convergence (added < 3 s before the rebootstrap installs, well inside
+    // the two-rotation eviction bound), so the converged node MUST cover
+    // it. Then the pending rebootstrap retry converges from the snapshot;
+    // resume the gate so the held (idempotent, LSN-checked) events and the
+    // new stream flow.
+    handle.coordinator.add('stall-c');
+    stalled = false;
+    gate.resume();
+    await cluster.waitForStreaming(node, 15000);
+    await vi.waitFor(
+      () => {
+        expect(probeMiddleware(middleware, 'stall-c').outcome).toBe('rejected');
+        expect(node.healthCheck().checks.sync.lastAppliedLsn).toBe(handle.coordinator.lastLsn);
+      },
+      { timeout: 10000 }
+    );
+    // Exact convergence on the stall tokens too — the coordinator is the
+    // oracle: with a 1.5 s rotateTime they may have legitimately rotated
+    // OUT of coverage during the outage (token TTL semantics); a node that
+    // disagrees with the coordinator in EITHER direction has diverged.
+    for (const item of ['stall-a', 'stall-b']) {
+      expect(probeMiddleware(middleware, item).outcome).toBe(
+        handle.coordinator.has(item) ? 'rejected' : 'accepted'
+      );
+    }
+    expect(node.healthCheck().checks.sync.dirty).toBe(false);
+    expect(node.healthCheck().healthy).toBe(true);
+  });
+
+  it('scenario 8 — the deployed middleware keeps rejecting across a hot rebootstrap (fail-closed swap)', async () => {
+    const cluster = track(new TestCluster());
+    const handle = await cluster.startCoordinator();
+    const spy = makeSnapshotSpy();
+    const corruptor = new StreamCorruptor();
+    const node = await cluster.startNode(handle, {
+      createClient: (options) => {
+        const inner = spy.wrap(corruptor.wrapClient(new CoordinatorClient(options)));
+        return {
+          getSnapshot: async () => {
+            // Widen every rebootstrap after the initial join a little so the
+            // sampler below collects plenty of probes across the swap
+            // (infrastructure-only delay — never used for assertion timing).
+            if (spy.getSnapshotCalls >= 1) {
+              await new Promise<void>((resolve) => setTimeout(resolve, 200));
+            }
+            return inner.getSnapshot();
+          },
+          subscribe: (lastLsn) => inner.subscribe(lastLsn),
+          pollDeltas: (fromLsn, maxEvents) => inner.pollDeltas(fromLsn, maxEvents),
+          close: () => inner.close(),
+        };
+      },
+    });
+    await cluster.waitForStreaming(node);
+
+    // Captured ONCE, like a real Express app would: this exact handler
+    // instance must survive the rebootstrap.
+    const middleware = node.getMiddleware();
+
+    handle.coordinator.add('mw-a');
+    await vi.waitFor(() => expect(probeMiddleware(middleware, 'mw-a').outcome).toBe('rejected'), {
+      timeout: 5000,
+    });
+    expect(probeMiddleware(middleware, 'mw-clean').outcome).toBe('accepted');
+    const snapshotsBefore = spy.getSnapshotCalls;
+    expect(snapshotsBefore).toBe(1);
+
+    // Sample the middleware continuously across the rebootstrap. INVARIANT:
+    // a revoked token is NEVER accepted — probes landing in the swap window
+    // must throw (fail-closed 500), every other probe must reject.
+    const outcomes: ReturnType<typeof probeMiddleware>[] = [];
+    const sampler = setInterval(() => {
+      outcomes.push(probeMiddleware(middleware, 'mw-a'));
+    }, 5);
+
+    corruptor.arm();
+    handle.coordinator.add('mw-b'); // injected LSN gap ⇒ hot rebootstrap
+
+    await vi.waitFor(() => expect(spy.getSnapshotCalls).toBeGreaterThan(snapshotsBefore), {
+      timeout: 10000,
+    });
+    await cluster.waitForStreaming(node, 10000);
+    await vi.waitFor(() => expect(node.has('mw-b')).toBe(true), { timeout: 5000 });
+    clearInterval(sampler);
+
+    // THE REGRESSION (C1): the pre-swap middleware instance still resolves
+    // the CURRENT revoker after the swap — the old code closed over the
+    // destroyed manager and silently accepted every revoked token.
+    expect(probeMiddleware(middleware, 'mw-a').outcome).toBe('rejected');
+    expect(probeMiddleware(middleware, 'mw-b').outcome).toBe('rejected');
+    expect(probeMiddleware(middleware, 'mw-clean-2').outcome).toBe('accepted');
+
+    expect(outcomes.length).toBeGreaterThan(0);
+    for (const probe of outcomes) {
+      expect(probe.outcome, 'a revoked token was accepted during the swap').not.toBe('accepted');
+      if (probe.outcome === 'error') {
+        expect((probe.error as Error).message).toMatch(/unavailable|not initialized/);
+      }
+    }
+
+    // Deterministic fail-closed path: once the node shuts down, the SAME
+    // deployed middleware throws instead of serving stale/destroyed state.
+    const shutdownPromise = node.shutdown();
+    expect(probeMiddleware(middleware, 'mw-a').outcome).toBe('error');
+    await shutdownPromise;
   });
 });

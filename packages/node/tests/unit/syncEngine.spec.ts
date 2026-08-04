@@ -45,7 +45,10 @@ const rotate = (lsn: number, generation: number): WireStreamEvent => ({
   rotate: { lsn: String(lsn), generation },
 });
 
-const keepalive = (): WireStreamEvent => ({ event: 'keepalive', keepalive: {} });
+const keepalive = (coordinatorLastLsn: string | number = '0', generation = 0): WireStreamEvent => ({
+  event: 'keepalive',
+  keepalive: { coordinatorLastLsn, generation },
+});
 
 const resnapshot = (generation: number): WireStreamEvent => ({
   event: 'resnapshot',
@@ -55,6 +58,7 @@ const resnapshot = (generation: number): WireStreamEvent => ({
 interface Harness {
   engine: SyncEngine;
   stream: FakeStream;
+  logger: ReturnType<typeof createMockLogger>;
   timeline: string[];
   updates: Array<{ lastLsn: number; generation: number; dirty?: boolean }>;
   rebootstrapReasons: string[];
@@ -69,6 +73,7 @@ function makeHarness(
     initialLsn?: number;
     initialGeneration?: number;
     pollIntervalMs?: number;
+    keepaliveIntervalMs?: number;
     baseReconnectDelayMs?: number;
     maxReconnectDelayMs?: number;
     delayFn?: (ms: number) => Promise<void>;
@@ -81,12 +86,14 @@ function makeHarness(
       moreAvailable: boolean;
     }>;
     rotateImpl?: () => Promise<void>;
+    stateStoreImpl?: { update: (state: { lastLsn: number; generation: number }) => void };
   } = {}
 ): Harness {
   const timeline: string[] = [];
   const updates: Array<{ lastLsn: number; generation: number; dirty?: boolean }> = [];
   const rebootstrapReasons: string[] = [];
   const stream = new FakeStream();
+  const logger = createMockLogger();
 
   const applyEntry = vi.fn((item: string) => {
     timeline.push(`apply:${item}`);
@@ -106,16 +113,17 @@ function makeHarness(
     nodeId: 'node-a',
     revoker: { applyEntry, rotateOnDemand },
     client: { subscribe, pollDeltas },
-    stateStore: {
+    stateStore: options.stateStoreImpl ?? {
       update: (state) => {
         timeline.push(`state:${state.lastLsn}`);
         updates.push({ ...state });
       },
     },
-    logger: createMockLogger(),
+    logger,
     initialLsn: options.initialLsn ?? 0,
     initialGeneration: options.initialGeneration ?? 0,
     pollIntervalMs: options.pollIntervalMs ?? 60_000, // off unless the test wants it
+    keepaliveIntervalMs: options.keepaliveIntervalMs ?? 60_000, // off unless the test wants it
     baseReconnectDelayMs: options.baseReconnectDelayMs ?? 5,
     maxReconnectDelayMs: options.maxReconnectDelayMs ?? 40,
     delayFn: options.delayFn,
@@ -125,6 +133,7 @@ function makeHarness(
   return {
     engine,
     stream,
+    logger,
     timeline,
     updates,
     rebootstrapReasons,
@@ -184,12 +193,65 @@ describe('SyncEngine event application', () => {
     harness.engine.start();
     await vi.waitFor(() => expect(harness?.engine.connected).toBe(true));
 
-    harness.stream.emit('data', keepalive());
+    harness.stream.emit('data', keepalive('7', 0));
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(harness.engine.lastAppliedLsn).toBe(0);
     expect(harness.updates).toHaveLength(0);
     expect(harness.rebootstrapReasons).toHaveLength(0);
+  });
+
+  it('a stalled stream (no events for 3 keepalive intervals) is force-reconnected', async () => {
+    const streams: FakeStream[] = [];
+    harness = makeHarness({
+      keepaliveIntervalMs: 20,
+      // Slow reconnect: keep the degraded mode observable.
+      baseReconnectDelayMs: 500,
+      maxReconnectDelayMs: 1000,
+      subscribeImpl: async () => {
+        const stream = new FakeStream();
+        streams.push(stream);
+        return stream as SyncSubscription;
+      },
+    });
+    harness.engine.start();
+    await vi.waitFor(() => expect(harness?.engine.connected).toBe(true));
+
+    streams[0].emit('data', entry(1, 't1'));
+    await vi.waitFor(() => expect(harness?.engine.lastAppliedLsn).toBe(1));
+
+    // Silence — no keepalives, no entries. After 3 intervals (60 ms) the
+    // watchdog treats the open stream as stalled and force-reconnects
+    // (degraded mode), exactly like a stream failure.
+    await vi.waitFor(() => expect(harness?.engine.mode).toBe('reconnecting'), {
+      timeout: 3000,
+    });
+    expect(streams[0].cancelled).toBe(true);
+  });
+
+  it('populated keepalives reset the stalled-stream watchdog', async () => {
+    harness = makeHarness({
+      keepaliveIntervalMs: 20,
+      baseReconnectDelayMs: 500,
+      maxReconnectDelayMs: 1000,
+    });
+    harness.engine.start();
+    await vi.waitFor(() => expect(harness?.engine.connected).toBe(true));
+
+    // A keepalive every 30 ms for ~150 ms — longer than the 60 ms silence
+    // threshold, yet the stream never goes silent ⇒ no forced reconnect.
+    for (let i = 1; i <= 5; i++) {
+      harness.stream.emit('data', keepalive(String(i), 0));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    expect(harness.engine.mode).toBe('streaming');
+    expect(harness.subscribe).toHaveBeenCalledTimes(1);
+    expect(harness.rebootstrapReasons).toHaveLength(0);
+
+    // Then silence falls ⇒ the watchdog fires anyway.
+    await vi.waitFor(() => expect(harness?.engine.mode).toBe('reconnecting'), {
+      timeout: 3000,
+    });
   });
 
   it('an LSN gap triggers rebootstrap and does NOT apply the event', async () => {
@@ -280,6 +342,34 @@ describe('SyncEngine event application', () => {
     expect(harness.rebootstrapReasons[0]).toMatch(/rotation failed/);
     expect(harness.engine.generation).toBe(0);
   });
+
+  it('state-store write failure ⇒ loud error + rebootstrap (the apply chain never stalls)', async () => {
+    harness = makeHarness({
+      stateStoreImpl: {
+        update: () => {
+          throw new Error('ENOSPC: no space left on device');
+        },
+      },
+    });
+    harness.engine.start();
+    await vi.waitFor(() => expect(harness?.engine.connected).toBe(true));
+
+    harness.stream.emit('data', entry(1, 't1'));
+
+    // The entry was applied in memory, but the persistence failure must
+    // trigger a loud fail-closed rebootstrap — NOT a permanently rejected
+    // apply chain that silently skips every later event.
+    await vi.waitFor(() => expect(harness?.rebootstrapReasons).toHaveLength(1));
+    expect(harness.rebootstrapReasons[0]).toMatch(/persistence failed/);
+    expect(harness.applyEntry).toHaveBeenCalledTimes(1);
+    expect(harness.engine.lastAppliedLsn).toBe(0); // never advanced/persisted
+    const errors = harness.logger.error.mock.calls.flat().join(' ');
+    expect(errors).toMatch(/failed to persist sync state/);
+
+    // The chain is not wedged on a rejection: stop() drains it cleanly.
+    await expect(harness.engine.stop()).resolves.toBeUndefined();
+    harness = null; // already stopped
+  });
 });
 
 describe('SyncEngine degraded mode', () => {
@@ -364,7 +454,7 @@ describe('SyncEngine degraded mode', () => {
     expect(delays[0]).toBeLessThanOrEqual(12);
   });
 
-  it('isRotationExternallyDriven: true while streaming or mid-coordinated-rotation', async () => {
+  it('isRotationExternallyDriven: true ONLY while a coordinated Rotate is being applied', async () => {
     const rotationGate: { resolve: (() => void) | null } = { resolve: null };
     harness = makeHarness({
       // Poll faster than the reconnect so the degraded poll delivers the
@@ -380,17 +470,18 @@ describe('SyncEngine degraded mode', () => {
     harness.engine.start();
     await vi.waitFor(() => expect(harness?.engine.connected).toBe(true));
 
-    // Healthy stream ⇒ rotations are delivered on schedule ⇒ externally driven.
-    expect(harness.engine.isRotationExternallyDriven()).toBe(true);
+    // Merely streaming does NOT make a rotation externally driven: a
+    // core-timer rotation on a stalled-but-open stream is a SELF-rotation
+    // (dirty ⇒ rebootstrap), never a coordinated one.
+    expect(harness.engine.isRotationExternallyDriven()).toBe(false);
 
-    // Take the stream down: degraded, no rotation in flight ⇒ NOT driven
-    // (a core rotation now would be a self-rotation ⇒ dirty).
+    // Take the stream down: degraded, no rotation in flight ⇒ not driven.
     harness.stream.emit('error', new Error('down'));
     await vi.waitFor(() => expect(harness?.engine.mode).toBe('reconnecting'));
     expect(harness.engine.isRotationExternallyDriven()).toBe(false);
 
     // A coordinated Rotate arriving via ANY channel marks the window driven
-    // again while it is being applied.
+    // while it is being applied.
     harness.pollDeltas.mockImplementationOnce(async () => ({
       events: [rotate(1, 1)],
       moreAvailable: false,
@@ -401,6 +492,9 @@ describe('SyncEngine degraded mode', () => {
 
     rotationGate.resolve?.();
     await vi.waitFor(() => expect(harness?.engine.generation).toBe(1));
+    // Rotation completed ⇒ no longer driven (a NEW core-timer rotation would
+    // again be a self-rotation).
+    expect(harness.engine.isRotationExternallyDriven()).toBe(false);
   });
 
   it('stop() cancels the stream and halts application', async () => {

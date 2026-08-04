@@ -9,7 +9,12 @@ export interface WireStreamEvent {
   event?: 'entry' | 'rotate' | 'keepalive' | 'resnapshot';
   entry?: { lsn: string; generation: number; item: string };
   rotate?: { lsn: string; generation: number };
-  keepalive?: Record<string, never>;
+  /**
+   * Stream liveness + lag hint (populated by the coordinator: its current
+   * lastLsn/generation). The sync engine consumes keepalives for liveness
+   * only — the stalled-stream watchdog resets on ANY event.
+   */
+  keepalive?: { coordinatorLastLsn?: string | number; generation?: number };
   resnapshot?: { generation: number };
 }
 
